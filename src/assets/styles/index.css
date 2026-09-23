@@ -1,0 +1,8 @@
+/**
+ * Global styles entry point.
+ *
+ * Imported once from main.js.
+ * Order matters: variables first, then base.
+ */
+@import './variables.css';
+@import './base.css';
