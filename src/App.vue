@@ -1,11 +1,10 @@
-<script setup></script>
+<script setup>
+import { RouterView } from 'vue-router'
+import BaseToast from '@/components/common/BaseToast.vue'
+</script>
 
 <template>
-  <h1>You did it!</h1>
-  <p>
-    Visit <a href="https://vuejs.org/" target="_blank" rel="noopener">vuejs.org</a> to read the
-    documentation
-  </p>
+  <RouterView />
+  <!-- Global toast notification container — rendered once at app root -->
+  <BaseToast />
 </template>
-
-<style scoped></style>
