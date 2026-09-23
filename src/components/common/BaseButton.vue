@@ -15,7 +15,7 @@ defineProps({
   variant: {
     type: String,
     default: 'primary',
-    validator: (v) => ['primary', 'secondary', 'danger', 'ghost'].includes(v),
+    validator: (v) => ['primary', 'secondary', 'danger', 'ghost', 'google'].includes(v),
   },
   type: {
     type: String,
@@ -131,6 +131,22 @@ const emit = defineEmits(['click'])
   color: var(--color-text-primary);
 }
 .base-btn--ghost:active:not(:disabled) {
+  background-color: var(--color-border);
+}
+
+/* Google — outlined, neutral surface so the colourful G icon stands out.
+   Designed to live under a primary button as a secondary sign-in option. */
+.base-btn--google {
+  background-color: var(--color-surface);
+  color: var(--color-text-primary);
+  border-color: var(--color-border-strong);
+  font-weight: var(--weight-medium);
+}
+.base-btn--google:hover:not(:disabled) {
+  background-color: var(--color-surface-alt);
+  border-color: var(--color-primary);
+}
+.base-btn--google:active:not(:disabled) {
   background-color: var(--color-border);
 }
 
