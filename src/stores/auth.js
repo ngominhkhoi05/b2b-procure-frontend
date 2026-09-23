@@ -1,15 +1,11 @@
 /**
- * Auth store — infrastructure only.
+ * Auth store — authentication state management.
  *
- * Phase 1 responsibilities:
+ * Responsibilities:
  *   - Persist / retrieve the JWT access token via localStorage.
- *   - Expose a reactive `isAuthenticated` computed.
- *   - Bootstrap token state on app startup (called from main.js).
- *
- * What this does NOT contain (deferred to Auth phase):
- *   - Login / registration API calls.
- *   - Refresh-token logic.
- *   - Role-specific business logic.
+ *   - Manage authentication state (token, currentUser).
+ *   - Provide login, register, logout, fetchCurrentUser actions.
+ *   - Bootstrap token state on app startup.
  */
 
 import { defineStore } from 'pinia'
@@ -19,6 +15,8 @@ import {
   setAccessToken,
   removeAccessToken,
 } from '@/utils/auth'
+import * as authService from '@/services/authService'
+import { useToastStore } from '@/stores/toast'
 
 export const useAuthStore = defineStore('auth', () => {
   // ── State ─────────────────────────────────────────────────────────────────
@@ -27,13 +25,16 @@ export const useAuthStore = defineStore('auth', () => {
   const token = ref(null)
 
   /** @type {import('vue').Ref<object|null>} */
-  const user = ref(null)
+  const currentUser = ref(null)
+
+  /** Whether a bootstrap / fetchCurrentUser request is in flight. */
+  const isLoadingUser = ref(false)
 
   // ── Computed ───────────────────────────────────────────────────────────────
 
-  const isAuthenticated = computed(() => Boolean(token.value))
+  const isAuthenticated = computed(() => Boolean(token.value) && currentUser.value !== null)
 
-  // ── Actions ───────────────────────────────────────────────────────────────
+  // ── Bootstrap ─────────────────────────────────────────────────────────────
 
   /**
    * Bootstrap token from localStorage on app startup.
@@ -42,6 +43,78 @@ export const useAuthStore = defineStore('auth', () => {
   function bootstrapFromStorage() {
     token.value = getAccessToken()
   }
+
+  /**
+   * Attempt to restore full session after a token is present.
+   * Call this on app mount when a token exists, or after login.
+   * Silently clears the session on 401.
+   */
+  async function fetchCurrentUser() {
+    if (!token.value) return
+
+    isLoadingUser.value = true
+    try {
+      const user = await authService.getCurrentUser()
+      currentUser.value = user
+    } catch (err) {
+      // 401 → token is invalid; clear session
+      if (err.status === 401 || err.code === 'UNAUTHORIZED') {
+        clearSession()
+      }
+      // Other errors: keep currentUser as-is; let callers handle
+    } finally {
+      isLoadingUser.value = false
+    }
+  }
+
+  // ── Actions ───────────────────────────────────────────────────────────────
+
+  /**
+   * Login with username and password.
+   *
+   * @param {{ username: string, password: string }} credentials
+   * @returns {Promise<void>}
+   */
+  async function login(credentials) {
+    const response = await authService.login(credentials)
+    setToken(response.accessToken)
+    // Login response already contains user info — use it directly
+    currentUser.value = {
+      id: response.userId,
+      username: response.username,
+      role: response.role,
+      avatarUrl: response.avatarUrl,
+    }
+  }
+
+  /**
+   * Register a new user.
+   *
+   * @param {object} data — RegisterRequest payload
+   * @returns {Promise<void>}
+   */
+  async function register(data) {
+    const response = await authService.register(data)
+    setToken(response.accessToken)
+    currentUser.value = {
+      id: response.userId,
+      username: response.username,
+      role: response.role,
+      avatarUrl: response.avatarUrl,
+    }
+  }
+
+  /**
+   * Logout — clears token, user, and redirects to login.
+   * No backend call needed; JWT removal is sufficient for this architecture.
+   */
+  function logout() {
+    clearSession()
+    const toast = useToastStore()
+    toast.success('Đăng xuất thành công')
+  }
+
+  // ── Internal helpers ───────────────────────────────────────────────────────
 
   /**
    * Persist a new access token.
@@ -53,30 +126,59 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   /**
-   * Clear the current session.
+   * Clear all session state (token + user) without toast.
    */
-  function clearToken() {
+  function clearSession() {
     token.value = null
-    user.value = null
+    currentUser.value = null
     removeAccessToken()
   }
 
   /**
-   * Store minimal user session data.
-   * Call this from the login / profile API responses in later phases.
-   * @param {object} userData
+   * Persist an OAuth2 callback session using the token issued by the
+   * backend's OAuth2AuthenticationSuccessHandler.
+   *
+   * The backend redirects the browser to the application's OAuth2 redirect
+   * page with the application JWT already issued (status=SUCCESS). This
+   * method performs the same wiring as a password login: store the token,
+   * populate the current user, then let the caller redirect to the
+   * intended route.
+   *
+   * @param {{ accessToken: string, userId: number, username: string, role: string, avatarUrl?: string|null }} payload
    */
-  function setUser(userData) {
-    user.value = userData
+  function loginWithOAuth2Success(payload) {
+    setToken(payload.accessToken)
+    currentUser.value = {
+      id: payload.userId,
+      username: payload.username,
+      role: payload.role,
+      avatarUrl: payload.avatarUrl ?? null,
+    }
   }
 
+  // ── Public API ─────────────────────────────────────────────────────────────
+
   return {
+    // State
     token,
-    user,
+    currentUser,
+    isLoadingUser,
+
+    // Computed
     isAuthenticated,
+
+    // Bootstrap
     bootstrapFromStorage,
+    fetchCurrentUser,
+
+    // Actions
+    login,
+    register,
+    logout,
+    loginWithOAuth2Success,
+
+    // Internal helpers (exposed for router guard)
     setToken,
-    clearToken,
-    setUser,
+    clearSession,
   }
 })

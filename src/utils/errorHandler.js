@@ -103,14 +103,25 @@ export function normalizeError(err) {
 
 /**
  * Centralised handler for API errors.
+ *
+ * NOTE: The Axios response interceptor in `services/api.js` already
+ * runs `normalizeError` on every rejected request, so the error
+ * passed here is already a normalised ApiError. Calling
+ * `normalizeError` again would double-wrap it (the normalised object
+ * has no `.response`, causing it to fall back to the network branch
+ * even though the backend returned a real 4xx/5xx response).
+ *
  * Accepts an optional `on401` callback so the router can be wired in Phase 2.
  *
- * @param {Error|ApiError} err
+ * @param {ApiError} err
  * @param {{ on401?: () => void }} [options]
  * @returns {{ code: string, message: string }}
  */
 export function handleApiError(err, options = {}) {
-  const error = normalizeError(err)
+  // err is already an ApiError from the response interceptor
+  const error = err?.status !== undefined && err?.message !== undefined
+    ? err
+    : normalizeError(err)
 
   if (error.status === 401 && typeof options.on401 === 'function') {
     options.on401()
