@@ -47,7 +47,11 @@ export const useAuthStore = defineStore('auth', () => {
   /**
    * Attempt to restore full session after a token is present.
    * Call this on app mount when a token exists, or after login.
-   * Silently clears the session on 401.
+   *
+   * On 401 the session is only cleared if we do NOT already have a
+   * currentUser — this prevents wiping a freshly established OAuth2
+   * session where the /users/me call failed due to transaction timing
+   * on the backend.
    */
   async function fetchCurrentUser() {
     if (!token.value) return
@@ -55,13 +59,26 @@ export const useAuthStore = defineStore('auth', () => {
     isLoadingUser.value = true
     try {
       const user = await authService.getCurrentUser()
-      currentUser.value = user
+      // Normalise the backend UserResponse shape into the shape
+      // currentUser uses everywhere: { id, username, role, avatarUrl, fullName, ... }
+      // The backend sends `roleName` (e.g. "BUYER"), not `role`.
+      currentUser.value = {
+        id: user.id,
+        username: user.username,
+        role: user.role ?? user.roleName ?? null,
+        avatarUrl: user.avatarUrl ?? null,
+        fullName: user.fullName ?? null,
+        email: user.email ?? null,
+        companyId: user.companyId ?? null,
+        companyName: user.companyName ?? null,
+      }
     } catch (err) {
-      // 401 → token is invalid; clear session
-      if (err.status === 401 || err.code === 'UNAUTHORIZED') {
+      // 401 → token is invalid; clear session ONLY if we don't already
+      // have a user (i.e., we are NOT in the middle of a fresh OAuth2 login).
+      if ((err.status === 401 || err.code === 'UNAUTHORIZED') && !currentUser.value) {
         clearSession()
       }
-      // Other errors: keep currentUser as-is; let callers handle
+      // Other errors (e.g. 403/500): keep currentUser as-is; let callers handle
     } finally {
       isLoadingUser.value = false
     }

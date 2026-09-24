@@ -66,9 +66,12 @@ async function handleSubmit() {
 
     toast.success('Đăng nhập thành công!')
 
-    // Redirect to the saved target route, or home
+    // Redirect to the saved target route, or the dashboard by default.
     const redirect = route.query.redirect
-    router.push(typeof redirect === 'string' ? redirect : '/')
+    const target = typeof redirect === 'string' && redirect && redirect !== '/'
+      ? redirect
+      : '/dashboard'
+    router.push(target)
   } catch (err) {
     const { message, errors: fieldErrors } = handleApiError(err)
 

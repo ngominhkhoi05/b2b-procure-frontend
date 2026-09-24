@@ -1,28 +1,32 @@
 /**
- * Vue Router — Phase 2 Authentication.
+ * Vue Router — Phase 3 Application Shell & Role Dashboards.
  *
  * Routes:
- *   Public: /login, /register
- *   Authenticated: (requiresAuth meta)
- *   Role-based: (roles meta)
+ *   Public:           /, /about, /login, /register, /oauth2/redirect, /403, /404
+ *   Authenticated:    /dashboard (role router), /profile
+ *   Placeholder:      /products, /cart, /orders, /users, /companies,
+ *                     /categories, /commission, /statistics, /settings
+ *                     → all point to the ProfileView (intentionally incomplete).
  *
  * Guard behaviour:
  *   - Unauthenticated → /login?redirect=<target>
  *   - Authenticated + wrong role → /403
- *   - After login → redirect target or /
+ *   - publicOnly routes redirect authenticated users to /dashboard
  */
 
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 
 // Lazy-import views so the bundle stays tree-shakeable.
-const HomeView       = () => import('@/views/HomeView.vue')
-const AboutView      = () => import('@/views/AboutView.vue')
-const LoginView      = () => import('@/views/auth/LoginView.vue')
-const RegisterView   = () => import('@/views/auth/RegisterView.vue')
+const HomeView           = () => import('@/views/HomeView.vue')
+const AboutView          = () => import('@/views/AboutView.vue')
+const LoginView          = () => import('@/views/auth/LoginView.vue')
+const RegisterView       = () => import('@/views/auth/RegisterView.vue')
 const OAuth2RedirectView = () => import('@/views/auth/OAuth2RedirectView.vue')
-const ForbiddenView  = () => import('@/views/ForbiddenView.vue')
-const NotFoundView   = () => import('@/views/NotFoundView.vue')
+const ForbiddenView      = () => import('@/views/ForbiddenView.vue')
+const NotFoundView       = () => import('@/views/NotFoundView.vue')
+const DashboardView      = () => import('@/views/dashboard/DashboardView.vue')
+const ProfileView        = () => import('@/views/profile/ProfileView.vue')
 
 // ── Route definitions ─────────────────────────────────────────────────────────
 
@@ -90,18 +94,125 @@ const routes = [
     },
   },
 
-  // ── Protected routes — add `meta: { requiresAuth: true }` per route ────────
-  // Examples:
-  // {
-  //   path: '/dashboard',
-  //   name: 'dashboard',
-  //   component: () => import('@/views/DashboardView.vue'),
-  //   meta: {
-  //     requiresAuth: true,
-  //     roles: ['ADMIN', 'BUYER', 'SUPPLIER'],
-  //     title: 'Bảng điều khiển',
-  //   },
-  // },
+  // ── Application routes ─────────────────────────────────────────────────
+  // Single role-aware dashboard route; the view itself picks the right
+  // dashboard based on auth.currentUser.role.
+  {
+    path: '/dashboard',
+    name: 'dashboard',
+    component: DashboardView,
+    meta: {
+      requiresAuth: true,
+      roles: ['ADMIN', 'BUYER', 'SUPPLIER'],
+      title: 'Bảng điều khiển',
+    },
+  },
+
+  // Profile placeholder (Phase 3 — no editable profile yet).
+  {
+    path: '/profile',
+    name: 'profile',
+    component: ProfileView,
+    meta: {
+      requiresAuth: true,
+      roles: ['ADMIN', 'BUYER', 'SUPPLIER'],
+      title: 'Hồ sơ',
+    },
+  },
+
+  // ── Placeholder routes ────────────────────────────────────────────────
+  // Sidebar links that point to features deferred to later phases.
+  // Each entry simply renders ProfileView with a per-route title.
+  {
+    path: '/products',
+    name: 'products',
+    component: ProfileView,
+    meta: {
+      requiresAuth: true,
+      roles: ['ADMIN', 'BUYER', 'SUPPLIER'],
+      title: 'Sản phẩm',
+    },
+  },
+  {
+    path: '/categories',
+    name: 'categories',
+    component: ProfileView,
+    meta: {
+      requiresAuth: true,
+      roles: ['ADMIN', 'SUPPLIER'],
+      title: 'Danh mục',
+    },
+  },
+  {
+    path: '/cart',
+    name: 'cart',
+    component: ProfileView,
+    meta: {
+      requiresAuth: true,
+      roles: ['BUYER'],
+      title: 'Giỏ hàng',
+    },
+  },
+  {
+    path: '/orders',
+    name: 'orders',
+    component: ProfileView,
+    meta: {
+      requiresAuth: true,
+      roles: ['ADMIN', 'BUYER', 'SUPPLIER'],
+      title: 'Đơn hàng',
+    },
+  },
+  {
+    path: '/users',
+    name: 'users',
+    component: ProfileView,
+    meta: {
+      requiresAuth: true,
+      roles: ['ADMIN'],
+      title: 'Người dùng',
+    },
+  },
+  {
+    path: '/companies',
+    name: 'companies',
+    component: ProfileView,
+    meta: {
+      requiresAuth: true,
+      roles: ['ADMIN'],
+      title: 'Công ty',
+    },
+  },
+  {
+    path: '/commission',
+    name: 'commission',
+    component: ProfileView,
+    meta: {
+      requiresAuth: true,
+      roles: ['ADMIN'],
+      title: 'Hoa hồng',
+    },
+  },
+  {
+    path: '/statistics',
+    name: 'statistics',
+    component: ProfileView,
+    meta: {
+      requiresAuth: true,
+      roles: ['ADMIN'],
+      title: 'Thống kê',
+    },
+  },
+  {
+    path: '/settings',
+    name: 'settings',
+    component: ProfileView,
+    meta: {
+      requiresAuth: true,
+      roles: ['ADMIN'],
+      title: 'Cài đặt',
+    },
+  },
 
   // ── Error routes ─────────────────────────────────────────────────────────
   {
@@ -141,7 +252,7 @@ const router = createRouter({
 // ── Navigation guard ───────────────────────────────────────────────────────────
 
 /**
- * Phase 2 auth guard:
+ * Phase 3 auth guard (extends Phase 2):
  *
  * 1. Update browser tab title.
  * 2. Skip guard for publicOnly routes when already authenticated.
@@ -161,9 +272,9 @@ router.beforeEach((to, _from) => {
 
   // Skip further checks for routes that are public-only
   // (e.g. /login, /register) when the user is already authenticated.
+  // Send them to the dashboard instead of leaving them on the auth screen.
   if (to.meta?.publicOnly && auth.isAuthenticated) {
-    // Send to home instead of staying on login/register page.
-    return { name: 'home' }
+    return { name: 'dashboard' }
   }
 
   // Route requires authentication
@@ -176,12 +287,14 @@ router.beforeEach((to, _from) => {
       }
     }
 
-    // Role check
+    // Role check — accept both `role` and `roleName` shapes so that
+    // login responses (role) and /users/me responses (roleName) both work.
     const allowedRoles = to.meta?.roles
+    const userRole = auth.currentUser?.role ?? auth.currentUser?.roleName
     if (
       Array.isArray(allowedRoles) &&
       allowedRoles.length > 0 &&
-      !allowedRoles.includes(auth.currentUser?.role)
+      !allowedRoles.includes(userRole)
     ) {
       return { name: 'forbidden' }
     }

@@ -65,7 +65,7 @@ function clearError() {
 </script>
 
 <template>
-  <main class="home-view">
+  <div class="home-view">
     <div class="container">
       <!-- Header -->
       <header class="home-header">
@@ -74,6 +74,11 @@ function clearError() {
         <p class="home-subtitle">
           Kiến trúc nền tảng đã sẵn sàng. Vue 3 + Vite + Pinia + Vue Router + Axios.
         </p>
+        <div v-if="auth.isAuthenticated" class="home-header__cta">
+          <RouterLink to="/dashboard" class="home-header__link">
+            Đi tới Bảng điều khiển →
+          </RouterLink>
+        </div>
       </header>
 
       <!-- Token info -->
@@ -258,7 +263,7 @@ function clearError() {
         </p>
       </section>
     </div>
-  </main>
+  </div>
 </template>
 
 <style scoped>
@@ -293,6 +298,26 @@ function clearError() {
   font-size: var(--font-md);
   color: var(--color-text-secondary);
   margin: 0;
+}
+
+.home-header__cta {
+  margin-top: var(--space-3);
+}
+
+.home-header__link {
+  display: inline-block;
+  padding: var(--space-2) var(--space-4);
+  background: var(--color-primary);
+  color: var(--color-text-inverse);
+  border-radius: var(--radius-md);
+  font-size: var(--font-sm);
+  font-weight: var(--weight-medium);
+}
+
+.home-header__link:hover {
+  background: var(--color-primary-hover);
+  color: var(--color-text-inverse);
+  text-decoration: none;
 }
 
 /* Badge */
