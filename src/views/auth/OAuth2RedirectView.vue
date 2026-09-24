@@ -15,7 +15,7 @@
  * normalises them through the existing auth architecture, and routes
  * the user to the appropriate destination:
  *
- *   SUCCESS         → save token, populate store, redirect to intended page
+ *   SUCCESS         → save token, populate store, fetch full user, redirect
  *   NEED_REGISTER   → save registration token to sessionStorage, redirect to /register?mode=oauth2
  *   error / unknown → show message, redirect to /login
  */
@@ -36,9 +36,18 @@ const statusMessage = ref('Đang hoàn tất đăng nhập với Google...')
 
 function intendedRedirect() {
   // The backend may carry a `redirect` query parameter that the
-  // application should respect after successful login. Fall back to '/'.
+  // application should respect after successful login. Fall back to
+  // the dashboard so users land in the application, not the landing page.
   const r = route.query.redirect
-  return typeof r === 'string' && r.startsWith('/') ? r : '/'
+  return typeof r === 'string' && r.startsWith('/') && r !== '/' ? r : '/dashboard'
+}
+
+function fallbackRedirectOnError() {
+  // On error we send users back to /login. After successful login they
+  // will be redirected to intendedRedirect() or '/dashboard' by LoginView.
+  return typeof route.query.redirect === 'string' && route.query.redirect.startsWith('/')
+    ? route.query.redirect
+    : '/'
 }
 
 function persistRegistrationToken(token) {
@@ -63,7 +72,7 @@ function extractErrorMessage(query) {
   return 'Đăng nhập bằng Google không thành công. Vui lòng thử lại.'
 }
 
-// ── Main flow ───────────────────────────────────────────────────────────────
+// ── Main flow ─────────────────────────────────────────────────────────────
 
 onMounted(async () => {
   const query = route.query
@@ -80,9 +89,24 @@ onMounted(async () => {
         : null,
     })
 
-    // Optionally refresh currentUser in background so we get the canonical
-    // /users/me payload (cover_image_url, phone, etc.).
-    authStore.fetchCurrentUser().catch(() => { /* keep what we have */ })
+    // CRITICAL: await fetchCurrentUser() to confirm the session is valid
+    // before redirecting. If it fails (401) the session is cleared and the
+    // user is sent to /login instead of a broken dashboard.
+    let fetchFailed = false
+    try {
+      await authStore.fetchCurrentUser()
+    } catch {
+      fetchFailed = true
+    }
+
+    if (!authStore.isAuthenticated) {
+      // Token was rejected (401) or session was cleared — do NOT go to dashboard.
+      toast.error('Phiên đăng nhập không hợp lệ. Vui lòng thử lại.')
+      setTimeout(() => {
+        router.replace({ path: '/login' })
+      }, 1200)
+      return
+    }
 
     toast.success('Đăng nhập bằng Google thành công!')
     router.replace(intendedRedirect())
@@ -109,7 +133,7 @@ onMounted(async () => {
   setTimeout(() => {
     router.replace({
       path: '/login',
-      query: { redirect: intendedRedirect() },
+      query: { redirect: fallbackRedirectOnError() },
     })
   }, 1200)
 })

@@ -3,7 +3,7 @@ import BaseEmpty from '@/components/common/BaseEmpty.vue'
 </script>
 
 <template>
-  <main class="not-found-view">
+  <div class="not-found-view">
     <BaseEmpty
       title="Trang không tìm thấy"
       description="Trang bạn đang tìm kiếm không tồn tại hoặc đã bị di chuyển."
@@ -12,12 +12,12 @@ import BaseEmpty from '@/components/common/BaseEmpty.vue'
         <button class="back-btn">Quay lại trang chủ</button>
       </RouterLink>
     </BaseEmpty>
-  </main>
+  </div>
 </template>
 
 <style scoped>
 .not-found-view {
-  min-height: 100vh;
+  min-height: 60vh;
   display: flex;
   align-items: center;
   justify-content: center;

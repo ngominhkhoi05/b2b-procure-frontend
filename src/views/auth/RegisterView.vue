@@ -92,7 +92,8 @@ const errors = reactive({
 const isSubmitting = ref(false)
 const intendedRedirect = computed(() => {
   const r = route.query.redirect
-  return typeof r === 'string' && r.startsWith('/') ? r : '/'
+  // After registration, send users to the application shell by default.
+  return typeof r === 'string' && r.startsWith('/') && r !== '/' ? r : '/dashboard'
 })
 
 // ── Validation ──────────────────────────────────────────────────────────────

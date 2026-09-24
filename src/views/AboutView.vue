@@ -2,7 +2,7 @@
 </script>
 
 <template>
-  <main class="about-view">
+  <div class="about-view">
     <div class="container">
       <div class="card">
         <h1 class="page-title">Giới thiệu</h1>
@@ -29,13 +29,12 @@
         </div>
       </div>
     </div>
-  </main>
+  </div>
 </template>
 
 <style scoped>
 .about-view {
-  min-height: 100vh;
-  padding: var(--space-8) var(--space-4);
+  padding: var(--space-6) var(--space-4);
 }
 
 .container {
