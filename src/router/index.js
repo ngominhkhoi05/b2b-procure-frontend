@@ -28,6 +28,12 @@ const NotFoundView       = () => import('@/views/NotFoundView.vue')
 const DashboardView      = () => import('@/views/dashboard/DashboardView.vue')
 const ProfileView        = () => import('@/views/profile/ProfileView.vue')
 
+// ── Phase 4 — Product & Category views ────────────────────────────────────
+const ProductListView         = () => import('@/views/products/ProductListView.vue')
+const ProductDetailView       = () => import('@/views/products/ProductDetailView.vue')
+const ProductFormView         = () => import('@/views/products/ProductFormView.vue')
+const CategoryManagementView  = () => import('@/views/categories/CategoryManagementView.vue')
+
 // ── Route definitions ─────────────────────────────────────────────────────────
 
 const routes = [
@@ -120,13 +126,13 @@ const routes = [
     },
   },
 
-  // ── Placeholder routes ────────────────────────────────────────────────
-  // Sidebar links that point to features deferred to later phases.
-  // Each entry simply renders ProfileView with a per-route title.
+  // ── Phase 4 routes ───────────────────────────────────────────────────
+  // Single role-aware product catalog — the view renders cards (Buyer)
+  // or a management table (Admin/Supplier) based on the auth role.
   {
     path: '/products',
     name: 'products',
-    component: ProfileView,
+    component: ProductListView,
     meta: {
       requiresAuth: true,
       roles: ['ADMIN', 'BUYER', 'SUPPLIER'],
@@ -134,9 +140,40 @@ const routes = [
     },
   },
   {
+    path: '/products/new',
+    name: 'product-new',
+    component: ProductFormView,
+    meta: {
+      requiresAuth: true,
+      roles: ['ADMIN', 'SUPPLIER'],
+      title: 'Thêm sản phẩm',
+    },
+  },
+  {
+    path: '/products/:id',
+    name: 'product-detail',
+    component: ProductDetailView,
+    meta: {
+      requiresAuth: true,
+      roles: ['ADMIN', 'BUYER', 'SUPPLIER'],
+      title: 'Chi tiết sản phẩm',
+    },
+  },
+  {
+    path: '/products/:id/edit',
+    name: 'product-edit',
+    component: ProductFormView,
+    meta: {
+      requiresAuth: true,
+      roles: ['ADMIN', 'SUPPLIER'],
+      title: 'Chỉnh sửa sản phẩm',
+    },
+  },
+  // Admin: full category management. Supplier: read-only listing.
+  {
     path: '/categories',
     name: 'categories',
-    component: ProfileView,
+    component: CategoryManagementView,
     meta: {
       requiresAuth: true,
       roles: ['ADMIN', 'SUPPLIER'],
