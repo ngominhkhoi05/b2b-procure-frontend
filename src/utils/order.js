@@ -208,6 +208,15 @@ export const SUPPLIER_STATUS_TABS = [
  * is refreshed after every action by re-fetching the full order detail, so
  * stale state is handled automatically.
  *
+ * Per-status rules (must mirror backend OrderLifecycleServiceImpl.confirmOrder):
+ *   • PENDING_CONFIRMATION + COD       → confirm + reject
+ *   • PENDING_CONFIRMATION + ZALOPAY   → reject only (payment not yet success,
+ *                                          backend rejects confirm until PAID)
+ *   • PAID (COD or ZALOPAY)            → confirm + reject (refund path)
+ *   • CONFIRMED → PREPARING only
+ *   • PREPARING → SHIPPING only
+ *   • SHIPPING  → COMPLETED only
+ *
  * @typedef {Object} SupplierOrderAction
  * @property {'confirm'|'reject'|'preparing'|'shipping'|'complete'} key
  * @property {string}  label     Vietnamese button label
@@ -222,7 +231,8 @@ export const SUPPLIER_AVAILABLE_ACTIONS = {
     { key: 'reject',  label: 'Từ chối đơn hàng',  variant: 'danger', requiresReason: true },
   ],
   PAID: [
-    { key: 'reject',  label: 'Từ chối & hoàn tiền', variant: 'danger', requiresReason: true },
+    { key: 'confirm', label: 'Xác nhận đơn hàng',     variant: 'primary' },
+    { key: 'reject',  label: 'Từ chối & hoàn tiền',  variant: 'danger', requiresReason: true },
   ],
   CONFIRMED: [
     { key: 'preparing', label: 'Đánh dấu đang chuẩn bị', variant: 'primary' },
@@ -239,12 +249,44 @@ export const SUPPLIER_AVAILABLE_ACTIONS = {
 }
 
 /**
- * Returns the array of supplier actions for the given order status.
- * Falls back to an empty array for unknown statuses.
+ * Filter rules keyed by OrderStatus. Each rule receives the payment context
+ * and returns the array of supplier actions to render.
+ *
+ * Rules intentionally mirror backend gating so the UI never offers an action
+ * the API will reject (e.g. Confirm on a PENDING_CONFIRMATION ZaloPay order
+ * whose payment has not yet reached SUCCESS — backend rejects with
+ * "current status: PENDING_CONFIRMATION, expected: PAID").
+ *
+ * @typedef {Object} PaymentContext
+ * @property {string|null} paymentMethod   'COD' | 'ZALOPAY' | null/unknown
+ *
+ * @type {Record<string, (ctx: PaymentContext) => SupplierOrderAction[]>}
+ */
+const SUPPLIER_ACTION_FILTERS = {
+  PENDING_CONFIRMATION: ({ paymentMethod }) => {
+    // ZaloPay orders in PENDING_CONFIRMATION have not been paid yet — backend
+    // will reject any confirm attempt. Only allow reject.
+    if (paymentMethod === 'ZALOPAY') {
+      return SUPPLIER_AVAILABLE_ACTIONS.PENDING_CONFIRMATION.filter(a => a.key === 'reject')
+    }
+    // COD (or unknown method, e.g. before payment is loaded): keep both.
+    return SUPPLIER_AVAILABLE_ACTIONS.PENDING_CONFIRMATION
+  },
+  PAID: () => SUPPLIER_AVAILABLE_ACTIONS.PAID,
+  CONFIRMED: () => SUPPLIER_AVAILABLE_ACTIONS.CONFIRMED,
+  PREPARING: () => SUPPLIER_AVAILABLE_ACTIONS.PREPARING,
+  SHIPPING:  () => SUPPLIER_AVAILABLE_ACTIONS.SHIPPING,
+}
+
+/**
+ * Returns the array of supplier actions to render for the given order status
+ * and payment context. Falls back to an empty array for unknown statuses.
  *
  * @param {string} status
+ * @param {PaymentContext} [paymentContext]
  * @returns {SupplierOrderAction[]}
  */
-export function getAvailableSupplierActions(status) {
-  return SUPPLIER_AVAILABLE_ACTIONS[status] ?? []
+export function getAvailableSupplierActions(status, paymentContext = {}) {
+  const filter = SUPPLIER_ACTION_FILTERS[status]
+  return filter ? filter(paymentContext) : []
 }
