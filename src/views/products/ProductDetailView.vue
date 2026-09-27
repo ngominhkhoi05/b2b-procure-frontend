@@ -10,6 +10,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { getProductById } from '@/services/productService'
 import { useAuthStore } from '@/stores/auth'
+import { useCartStore } from '@/stores/cart'
 import { useToastStore } from '@/stores/toast'
 import { handleApiError } from '@/utils/errorHandler'
 import { formatCurrency, formatDateTime, formatNumber, truncate } from '@/utils/format'
@@ -23,10 +24,12 @@ import BaseSelect from '@/components/common/BaseSelect.vue'
 
 import ProductStatusBadge from '@/components/product/ProductStatusBadge.vue'
 import ProductPriceTiers from '@/components/product/ProductPriceTiers.vue'
+import AddToCartWidget from '@/components/cart/AddToCartWidget.vue'
 
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
+const cartStore = useCartStore()
 const toast = useToastStore()
 
 const productId = computed(() => route.params.id)
@@ -44,6 +47,9 @@ const error = ref(null)
 const showStatusModal = ref(false)
 const statusDraft = ref('ACTIVE')
 const statusSubmitting = ref(false)
+
+// Buyer-only: add-to-cart submission state.
+const addingToCart = ref(false)
 
 async function load() {
   loading.value = true
@@ -88,6 +94,29 @@ function onImgError(e) {
   e.target.style.display = 'none'
   e.target.closest('.product-detail-view__image-wrap')?.classList.add('product-detail-view__image-wrap--no-image')
 }
+
+async function onAddToCart(quantity) {
+  if (!product.value) return
+  addingToCart.value = true
+  try {
+    await cartStore.addItem(product.value.id, quantity)
+    toast.success('Đã thêm sản phẩm vào giỏ hàng')
+  } catch (err) {
+    const { message } = handleApiError(err)
+    toast.error(message)
+  } finally {
+    addingToCart.value = false
+  }
+}
+
+// Disable the Add-to-Cart widget when the product is inactive or has no stock.
+const addToCartDisabled = computed(() => {
+  if (!product.value) return true
+  if (product.value.status && product.value.status !== 'ACTIVE') return true
+  const available = product.value.availableQuantity
+  if (available != null && available <= 0) return true
+  return addingToCart.value
+})
 </script>
 
 <template>
@@ -187,6 +216,15 @@ function onImgError(e) {
             <BaseButton variant="secondary" @click="openStatusModal">
               Đổi trạng thái
             </BaseButton>
+          </div>
+
+          <!-- Add to cart (Buyer only) -->
+          <div v-if="isBuyer" class="product-detail-view__add-to-cart">
+            <AddToCartWidget
+              :available-quantity="product.availableQuantity ?? null"
+              :disabled="addToCartDisabled"
+              @add="onAddToCart"
+            />
           </div>
         </div>
       </section>
@@ -415,6 +453,10 @@ function onImgError(e) {
   gap: var(--space-3);
   padding-top: var(--space-2);
   flex-wrap: wrap;
+}
+
+.product-detail-view__add-to-cart {
+  padding-top: var(--space-2);
 }
 
 .product-detail-view__section {
