@@ -46,6 +46,24 @@ export async function listOrders(params = {}) {
 }
 
 /**
+ * Fetch a single order by id, including items + status history + payment summary.
+ *
+ * Backend endpoint:
+ *   GET /api/v1/orders/{id}
+ *
+ * Used by the Phase 6 checkout result page to read the latest payment
+ * status after a ZaloPay redirect, and by the Phase 7 order detail view.
+ * Backend translates access-denied to 404 to avoid leaking order existence.
+ *
+ * @param {number|string} id
+ * @returns {Promise<OrderDetailResponse>}
+ */
+export async function getOrderById(id) {
+  const response = await api.get(`/orders/${id}`)
+  return response.data.data
+}
+
+/**
  * @typedef {Object} OrderResponse
  * @property {number}                       id
  * @property {string}                       orderCode
@@ -65,24 +83,6 @@ export async function listOrders(params = {}) {
  * @property {string|null}                  paymentMethod
  * @property {string|null}                  paymentStatus
  */
-
-/**
- * Fetch a single order by id.
- *
- * Backend endpoint:
- *   GET /api/v1/orders/{id}
- *
- * Returns 404 when the authenticated user cannot access the order
- * (existence-hiding — the response body does not leak whether the order
- * exists at all).
- *
- * @param {number|string} id
- * @returns {Promise<OrderDetailResponse>}
- */
-export async function getOrderById(id) {
-  const response = await api.get(`/orders/${id}`)
-  return response.data.data
-}
 
 /**
  * Fetch the status-change history for a given order.
