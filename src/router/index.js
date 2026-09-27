@@ -41,6 +41,10 @@ const CartView = () => import('@/views/cart/CartView.vue')
 const CheckoutView       = () => import('@/views/checkout/CheckoutView.vue')
 const CheckoutResultView = () => import('@/views/checkout/CheckoutResultView.vue')
 
+// ── Phase 7 — Buyer Order views ──────────────────────────────────────────
+const OrderListView   = () => import('@/views/orders/OrderListView.vue')
+const OrderDetailView = () => import('@/views/orders/OrderDetailView.vue')
+
 // ── Route definitions ─────────────────────────────────────────────────────────
 
 const routes = [
@@ -220,11 +224,21 @@ const routes = [
   {
     path: '/orders',
     name: 'orders',
-    component: ProfileView,
+    component: OrderListView,
     meta: {
       requiresAuth: true,
       roles: ['ADMIN', 'BUYER', 'SUPPLIER'],
       title: 'Đơn hàng',
+    },
+  },
+  {
+    path: '/orders/:id',
+    name: 'order-detail',
+    component: OrderDetailView,
+    meta: {
+      requiresAuth: true,
+      roles: ['BUYER'],
+      title: 'Chi tiết đơn hàng',
     },
   },
   {
