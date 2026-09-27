@@ -3,19 +3,27 @@
  * CartView — Buyer's cart page.
  *
  * Loads the cart on mount, groups items by supplier, and lets the buyer
- * update quantities, remove items, and clear the cart.
+ * update quantities, remove items, clear the cart, and (Phase 6) select
+ * items for a single-supplier checkout.
+ *
+ * Selection invariants (Phase 6):
+ *   - One checkout = one supplier.
+ *   - Selecting an item from a different supplier unchecks the current
+ *     selection so we never accidentally send mixed-supplier data.
  *
  * Notes:
  *   - All pricing, stock and availability values come from the backend.
- *   - The checkout button is intentionally disabled — Phase 6 only.
  *   - After every mutation we re-fetch the cart via the Pinia store so
  *     totals and per-row data stay in sync.
+ *   - Checkout is wired up in Phase 6. COD ends at /checkout/result;
+ *     ZaloPay does a full-tab redirect from the checkout page.
  */
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useCartStore } from '@/stores/cart'
 import { useToastStore } from '@/stores/toast'
 import { handleApiError } from '@/utils/errorHandler'
+import { saveCheckoutSession } from '@/utils/checkoutSession'
 
 import BaseLoading from '@/components/common/BaseLoading.vue'
 import BaseEmpty from '@/components/common/BaseEmpty.vue'
@@ -36,12 +44,18 @@ const clearing = ref(false)
 // productId currently being mutated (update or remove). Single-flight per row.
 const submittingId = ref(null)
 
+// Phase 6 — selected CartItem IDs (CartItem.id, NOT productId).
+const selectedIds = ref(new Set())
+
 const cart = computed(() => cartStore.cart)
 const loading = computed(() => cartStore.loading && !cart.value)
 const loadError = computed(() => cartStore.error)
 
 // Group items by supplier — backend already provides supplierCompanyId
 // and supplierCompanyName on every CartItemResponse.
+//
+// Each item is decorated with `selected: boolean` so the children can
+// stay purely controlled.
 const supplierGroups = computed(() => {
   if (!cart.value?.items) return []
   const groups = new Map()
@@ -54,9 +68,60 @@ const supplierGroups = computed(() => {
         items: [],
       })
     }
-    groups.get(key).items.push(item)
+    groups.get(key).items.push({
+      ...item,
+      selected: selectedIds.value.has(item.id),
+    })
   }
   return Array.from(groups.values())
+})
+
+// All currently-checked CartItem IDs (one supplier only by construction).
+const selectedCartItems = computed(() => {
+  const result = []
+  for (const group of supplierGroups.value) {
+    for (const item of group.items) {
+      if (item.selected) result.push(item)
+    }
+  }
+  return result
+})
+
+const selectedSupplierId = computed(() => {
+  const items = selectedCartItems.value
+  if (items.length === 0) return null
+  return items[0].supplierCompanyId
+})
+
+const selectedSupplierName = computed(() => {
+  const items = selectedCartItems.value
+  if (items.length === 0) return null
+  return items[0].supplierCompanyName || 'Nhà cung cấp'
+})
+
+// All selected items must be available AND have a unit price — the
+// backend will reject any that aren't, but we surface it earlier.
+const allSelectedAreValid = computed(() => {
+  const items = selectedCartItems.value
+  if (items.length === 0) return false
+  return items.every((i) => i.available && i.unitPrice != null)
+})
+
+const canCheckout = computed(
+  () =>
+    selectedCartItems.value.length > 0 &&
+    !!selectedSupplierId.value &&
+    allSelectedAreValid.value
+)
+
+const checkoutHint = computed(() => {
+  if (selectedCartItems.value.length === 0) {
+    return 'Vui lòng chọn ít nhất một sản phẩm để thanh toán'
+  }
+  if (!allSelectedAreValid.value) {
+    return 'Vui lòng bỏ chọn các sản phẩm không khả dụng'
+  }
+  return null
 })
 
 async function load() {
@@ -65,9 +130,29 @@ async function load() {
   } catch {
     // error is stored on the store; UI shows it via BaseError with retry
   }
+  // Re-fetch discards any stale selections.
+  selectedIds.value = new Set()
 }
 
 onMounted(load)
+
+// If the cart changes underneath us (e.g. supplier deactivated, items
+// removed by a background poll) prune any selections that no longer
+// reference valid cart items.
+watch(
+  () => cart.value?.items?.map((i) => i.id) || [],
+  (currentIds) => {
+    const set = new Set(currentIds)
+    let mutated = false
+    for (const id of selectedIds.value) {
+      if (!set.has(id)) {
+        selectedIds.value.delete(id)
+        mutated = true
+      }
+    }
+    if (mutated) selectedIds.value = new Set(selectedIds.value)
+  }
+)
 
 async function onUpdateQuantity({ productId, quantity }) {
   submittingId.value = productId
@@ -108,6 +193,7 @@ async function confirmClear() {
   try {
     await cartStore.clearAll()
     toast.success('Đã xóa toàn bộ giỏ hàng')
+    selectedIds.value = new Set()
     showClearModal.value = false
   } catch (err) {
     const { message } = handleApiError(err)
@@ -120,6 +206,100 @@ async function confirmClear() {
 function browseProducts() {
   router.push({ name: 'products' })
 }
+
+// ── Selection (Phase 6) ────────────────────────────────────────────────────
+
+/**
+ * Toggle the selected state of a single item.
+ *
+ * Enforces the single-supplier invariant: when a user checks an item
+ * that belongs to a different supplier than the current selection, we
+ * silently replace the selection with that single new item. This
+ * matches the backend's "one checkout = one supplier" rule.
+ */
+function onUpdateItemSelected({ cartItemId, selected }) {
+  const next = new Set(selectedIds.value)
+
+  if (selected) {
+    const item = cart.value?.items?.find((i) => i.id === cartItemId)
+    if (!item) return
+
+    const incomingSupplier = item.supplierCompanyId
+    if (selectedSupplierId.value && selectedSupplierId.value !== incomingSupplier) {
+      // Different supplier — wipe the previous selection.
+      next.clear()
+    }
+    next.add(cartItemId)
+  } else {
+    next.delete(cartItemId)
+  }
+
+  selectedIds.value = next
+}
+
+/**
+ * Toggle every available item of one supplier group at once.
+ * If `select` is false we clear the entire group from the selection.
+ */
+function onToggleAll(supplierId, select) {
+  const next = new Set(selectedIds.value)
+
+  // If the user is selecting and there's a different supplier already
+  // selected, wipe first (single-supplier invariant).
+  if (select && selectedSupplierId.value && selectedSupplierId.value !== supplierId) {
+    next.clear()
+  }
+
+  for (const item of cart.value?.items || []) {
+    if (item.supplierCompanyId !== supplierId) continue
+    if (!item.available || item.unitPrice == null) continue
+    if (select) {
+      next.add(item.id)
+    } else {
+      next.delete(item.id)
+    }
+  }
+
+  selectedIds.value = next
+}
+
+function onCheckout() {
+  if (!canCheckout.value) return
+  const items = selectedCartItems.value
+  const subtotal = items.reduce(
+    (acc, i) => acc + (Number(i.subtotal) || 0),
+    0
+  )
+  saveCheckoutSession({
+    orderId: null,
+    orderCode: null,
+    paymentId: null,
+    paymentCode: null,
+    paymentMethod: null,
+    paymentStatus: null,
+    orderStatus: null,
+    subtotal,
+    totalAmount: subtotal,
+    paymentExpiredAt: null,
+    supplierCompanyId: selectedSupplierId.value,
+    supplierCompanyName: selectedSupplierName.value,
+    selectedItems: items.map((i) => ({
+      cartItemId: i.id,
+      productId: i.productId,
+      productName: i.productName,
+      productImageUrl: i.productImageUrl,
+      sku: i.sku,
+      quantity: i.quantity,
+      unitPrice: i.unitPrice,
+      subtotal: i.subtotal,
+      supplierCompanyId: i.supplierCompanyId,
+      supplierCompanyName: i.supplierCompanyName,
+      available: i.available,
+    })),
+    createdAt: Date.now(),
+  })
+  router.push({ name: 'checkout', query: { supplier: String(selectedSupplierId.value) } })
+}
 </script>
 
 <template>
@@ -129,7 +309,7 @@ function browseProducts() {
       <div>
         <h1 class="cart-view__title">Giỏ hàng</h1>
         <p class="cart-view__subtitle">
-          Xem và quản lý các sản phẩm bạn đã thêm vào giỏ.
+          Chọn sản phẩm từ một nhà cung cấp để tiến hành thanh toán.
         </p>
       </div>
       <BaseButton
@@ -177,13 +357,24 @@ function browseProducts() {
           :supplier-name="group.name"
           :items="group.items"
           :submitting-id="submittingId"
+          selectable
           @update-quantity="onUpdateQuantity"
           @remove="onRemove"
+          @update-item-selected="onUpdateItemSelected"
+          @toggle-all="(select) => onToggleAll(group.id, select)"
         />
       </div>
 
       <div class="cart-view__aside">
-        <CartSummary :cart="cart" :clearing="clearing" @clear="openClearModal" />
+        <CartSummary
+          :cart="cart"
+          :clearing="clearing"
+          selectable
+          :can-checkout="canCheckout"
+          :checkout-hint="checkoutHint"
+          @clear="openClearModal"
+          @checkout="onCheckout"
+        />
       </div>
     </div>
 

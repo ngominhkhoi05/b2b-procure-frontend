@@ -450,51 +450,50 @@ function badgeClass(status, toneMap) {
           </ol>
         </section>
 
+        <!-- ── Cancel modal ──────────────────────────────────────────────────────── -->
+        <BaseModal
+          v-if="showCancelModal"
+          :model-value="true"
+          title="Xác nhận hủy đơn hàng"
+          @update:model-value="closeCancelModal"
+        >
+          <p class="order-detail-view__cancel-desc">
+            Vui lòng nhập lý do hủy đơn hàng (bắt buộc).
+          </p>
+          <textarea
+            v-model="cancelReason"
+            class="order-detail-view__textarea"
+            placeholder="Ví dụ: Tôi đã đặt nhầm sản phẩm..."
+            rows="4"
+            maxlength="500"
+            :disabled="cancelSubmitting"
+          />
+          <p class="order-detail-view__char-count">
+            {{ cancelReason.length }} / 500
+          </p>
+
+          <template #footer>
+            <BaseButton
+              variant="ghost"
+              :disabled="cancelSubmitting"
+              @click="closeCancelModal"
+            >
+              Quay lại
+            </BaseButton>
+            <BaseButton
+              variant="danger"
+              :disabled="cancelDisabled"
+              :loading="cancelSubmitting"
+              @click="submitCancel"
+            >
+              Xác nhận hủy
+            </BaseButton>
+          </template>
+        </BaseModal>
+
       </template>
     </div>
   </div>
-</template>
-
-<!-- ── Cancel modal ──────────────────────────────────────────────────────────── -->
-<template v-if="showCancelModal">
-  <BaseModal
-    :model-value="true"
-    title="Xác nhận hủy đơn hàng"
-    @update:model-value="closeCancelModal"
-  >
-    <p class="order-detail-view__cancel-desc">
-      Vui lòng nhập lý do hủy đơn hàng (bắt buộc).
-    </p>
-    <textarea
-      v-model="cancelReason"
-      class="order-detail-view__textarea"
-      placeholder="Ví dụ: Tôi đã đặt nhầm sản phẩm..."
-      rows="4"
-      maxlength="500"
-      :disabled="cancelSubmitting"
-    />
-    <p class="order-detail-view__char-count">
-      {{ cancelReason.length }} / 500
-    </p>
-
-    <template #footer>
-      <BaseButton
-        variant="ghost"
-        :disabled="cancelSubmitting"
-        @click="closeCancelModal"
-      >
-        Quay lại
-      </BaseButton>
-      <BaseButton
-        variant="danger"
-        :disabled="cancelDisabled"
-        :loading="cancelSubmitting"
-        @click="submitCancel"
-      >
-        Xác nhận hủy
-      </BaseButton>
-    </template>
-  </BaseModal>
 </template>
 
 <style scoped>
