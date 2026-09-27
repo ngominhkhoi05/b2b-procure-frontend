@@ -120,6 +120,95 @@ export async function cancelOrder(id, body) {
   return response.data.data
 }
 
+// ─── Supplier lifecycle actions ────────────────────────────────────────────────
+
+/**
+ * Supplier confirms an order, moving it from PENDING_CONFIRMATION → CONFIRMED.
+ *
+ * Backend endpoint:
+ *   POST /api/v1/supplier/orders/{orderId}/confirm
+ *
+ * Backend allows confirmation when the current status is PENDING_CONFIRMATION.
+ * For COD orders the status becomes CONFIRMED immediately; for online-paid
+ * orders the status remains PAID until the payment webhook fires.
+ *
+ * @param {number|string} id
+ * @returns {Promise<OrderResponse>}
+ */
+export async function confirmSupplierOrder(id) {
+  const response = await api.post(`/supplier/orders/${id}/confirm`)
+  return response.data.data
+}
+
+/**
+ * Supplier rejects an order, optionally triggering a refund.
+ *
+ * Backend endpoint:
+ *   POST /api/v1/supplier/orders/{orderId}/reject
+ *
+ * Backend allows supplier rejection when the current status is
+ * PENDING_CONFIRMATION, PAID, or CONFIRMED. The reason field is
+ * MANDATORY and is validated by the backend with `@NotBlank @Size(max=500)`.
+ * For online-paid orders the backend moves the linked Payment to
+ * REFUND_PENDING; the supplier does NOT need to call any refund API.
+ *
+ * @param {number|string} id
+ * @param {{ reason: string }} body  — rejection reason (1–500 chars, non-blank)
+ * @returns {Promise<OrderResponse>}
+ */
+export async function rejectSupplierOrder(id, body) {
+  const response = await api.post(`/supplier/orders/${id}/reject`, body)
+  return response.data.data
+}
+
+/**
+ * Supplier marks an order as being prepared, moving it CONFIRMED → PREPARING.
+ *
+ * Backend endpoint:
+ *   PATCH /api/v1/supplier/orders/{orderId}/preparing
+ *
+ * Backend allows this transition only when the current status is CONFIRMED.
+ *
+ * @param {number|string} id
+ * @returns {Promise<OrderResponse>}
+ */
+export async function markOrderPreparing(id) {
+  const response = await api.patch(`/supplier/orders/${id}/preparing`)
+  return response.data.data
+}
+
+/**
+ * Supplier marks an order as shipped, moving it PREPARING → SHIPPING.
+ *
+ * Backend endpoint:
+ *   PATCH /api/v1/supplier/orders/{orderId}/shipping
+ *
+ * Backend allows this transition only when the current status is PREPARING.
+ *
+ * @param {number|string} id
+ * @returns {Promise<OrderResponse>}
+ */
+export async function markOrderShipping(id) {
+  const response = await api.patch(`/supplier/orders/${id}/shipping`)
+  return response.data.data
+}
+
+/**
+ * Supplier marks an order as completed, moving it SHIPPING → COMPLETED.
+ *
+ * Backend endpoint:
+ *   PATCH /api/v1/supplier/orders/{orderId}/complete
+ *
+ * Backend allows this transition only when the current status is SHIPPING.
+ *
+ * @param {number|string} id
+ * @returns {Promise<OrderResponse>}
+ */
+export async function completeSupplierOrder(id) {
+  const response = await api.patch(`/supplier/orders/${id}/complete`)
+  return response.data.data
+}
+
 /**
  * @typedef {Object} PageResponse
  * @property {OrderResponse[]} content

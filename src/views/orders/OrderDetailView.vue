@@ -16,8 +16,19 @@ import {
   getPaymentMethodLabel,
   getPaymentStatusLabel,
   getPaymentStatusTone,
+  SUPPLIER_AVAILABLE_ACTIONS,
+  getAvailableSupplierActions,
 } from '@/utils/order'
-import { getOrderById, getOrderHistory, cancelOrder } from '@/services/orderService'
+import {
+  getOrderById,
+  getOrderHistory,
+  cancelOrder,
+  confirmSupplierOrder,
+  rejectSupplierOrder,
+  markOrderPreparing,
+  markOrderShipping,
+  completeSupplierOrder,
+} from '@/services/orderService'
 import { useAuthStore } from '@/stores/auth'
 import { useToastStore } from '@/stores/toast'
 import { handleApiError } from '@/utils/errorHandler'
@@ -46,11 +57,20 @@ const showCancelModal = ref(false)
 const cancelReason    = ref('')
 const cancelSubmitting = ref(false)
 
+const showRejectModal  = ref(false)
+const rejectReason     = ref('')
+const rejectSubmitting = ref(false)
+
+const actionSubmitting = ref('')
+
 // ── Role guard ────────────────────────────────────────────────────────────────
 
+const role = computed(() => auth.currentUser?.role ?? auth.currentUser?.roleName)
+const isBuyer    = computed(() => role.value === 'BUYER')
+const isSupplier = computed(() => role.value === 'SUPPLIER')
+
 onMounted(() => {
-  const role = auth.currentUser?.role ?? auth.currentUser?.roleName
-  if (role !== 'BUYER') {
+  if (role.value !== 'BUYER' && role.value !== 'SUPPLIER') {
     router.replace('/403')
     return
   }
@@ -61,8 +81,7 @@ onMounted(() => {
 watch(
   () => route.params.id,
   () => {
-    const role = auth.currentUser?.role ?? auth.currentUser?.roleName
-    if (role !== 'BUYER') return
+    if (!isBuyer.value && !isSupplier.value) return
     load()
   }
 )
@@ -162,6 +181,60 @@ const cancelDisabled = computed(
   () => cancelSubmitting.value || !cancelReason.value.trim()
 )
 
+const availableActions = computed(() =>
+  order.value ? getAvailableSupplierActions(order.value.status) : []
+)
+
+async function runSupplierAction(action) {
+  if (actionSubmitting.value) return
+
+  if (action.key === 'reject') {
+    rejectReason.value = ''
+    showRejectModal.value = true
+    return
+  }
+
+  actionSubmitting.value = action.key
+  try {
+    if (action.key === 'confirm')   await confirmSupplierOrder(order.value.id)
+    if (action.key === 'preparing') await markOrderPreparing(order.value.id)
+    if (action.key === 'shipping')  await markOrderShipping(order.value.id)
+    if (action.key === 'complete')  await completeSupplierOrder(order.value.id)
+
+    toast.success(`Đã cập nhật trạng thái đơn hàng.`)
+    await load()
+  } catch (err) {
+    const { message } = handleApiError(err)
+    toast.error(message)
+    await load()
+  } finally {
+    actionSubmitting.value = ''
+  }
+}
+
+async function submitReject() {
+  const reason = rejectReason.value.trim()
+  if (!reason) return
+  rejectSubmitting.value = true
+  try {
+    await rejectSupplierOrder(order.value.id, { reason })
+    toast.success('Đã từ chối đơn hàng.')
+    showRejectModal.value = false
+    rejectReason.value = ''
+    await load()
+  } catch (err) {
+    const { message } = handleApiError(err)
+    toast.error(message)
+    await load()
+  } finally {
+    rejectSubmitting.value = false
+  }
+}
+
+const rejectDisabled = computed(
+  () => rejectSubmitting.value || !rejectReason.value.trim()
+)
+
 // ── Image error handler ───────────────────────────────────────────────────────
 
 function onImgError(e) {
@@ -224,7 +297,7 @@ function badgeClass(status, toneMap) {
             </div>
             <div class="order-detail-view__header-right">
               <BaseButton
-                v-if="canCancel"
+                v-if="isBuyer && canCancel"
                 variant="danger"
                 @click="openCancelModal"
               >
@@ -254,11 +327,22 @@ function badgeClass(status, toneMap) {
         </section>
 
         <!-- ── Nhà cung cấp ──────────────────────────────────── -->
-        <section class="order-detail-view__section">
+        <section v-if="isBuyer" class="order-detail-view__section">
           <h2 class="order-detail-view__section-title">Nhà cung cấp</h2>
           <p class="order-detail-view__plain-text">
             {{ order.supplierCompanyName || '—' }}
           </p>
+        </section>
+
+        <!-- ── Khách hàng (SUPPLIER only) ─────────────────────── -->
+        <section v-if="isSupplier" class="order-detail-view__section">
+          <h2 class="order-detail-view__section-title">Khách hàng</h2>
+          <dl class="order-detail-view__dl">
+            <div class="order-detail-view__dl-row">
+              <dt>Tên công ty</dt>
+              <dd>{{ order.buyerCompanyName || '—' }}</dd>
+            </div>
+          </dl>
         </section>
 
         <!-- ── Thông tin giao hàng ───────────────────────────── -->
@@ -450,10 +534,27 @@ function badgeClass(status, toneMap) {
           </ol>
         </section>
 
-        <!-- ── Cancel modal ──────────────────────────────────────────────────────── -->
+        <!-- ── Thao tác đơn hàng (SUPPLIER only) ──────────────── -->
+        <section v-if="isSupplier && availableActions.length > 0" class="order-detail-view__section">
+          <h2 class="order-detail-view__section-title">Thao tác đơn hàng</h2>
+          <div class="order-detail-view__actions-list">
+            <BaseButton
+              v-for="action in availableActions"
+              :key="action.key"
+              :variant="action.variant === 'danger' ? 'danger' : 'primary'"
+              block
+              :disabled="actionSubmitting !== ''"
+              @click="runSupplierAction(action)"
+            >
+              {{ action.label }}
+            </BaseButton>
+          </div>
+        </section>
+
+        <!-- ── Cancel modal (BUYER) ───────────────────────────── -->
         <BaseModal
           v-if="showCancelModal"
-          :model-value="true"
+          :model-value="showCancelModal"
           title="Xác nhận hủy đơn hàng"
           @update:model-value="closeCancelModal"
         >
@@ -487,6 +588,38 @@ function badgeClass(status, toneMap) {
               @click="submitCancel"
             >
               Xác nhận hủy
+            </BaseButton>
+          </template>
+        </BaseModal>
+
+        <!-- ── Supplier reject modal ─────────────────────────── -->
+        <BaseModal
+          v-if="showRejectModal"
+          :model-value="showRejectModal"
+          title="Từ chối đơn hàng"
+          @update:model-value="showRejectModal = false"
+        >
+          <p class="order-detail-view__modal-hint">
+            Vui lòng nhập lý do từ chối. Lý do sẽ được lưu vào lịch sử đơn hàng.
+          </p>
+          <textarea
+            v-model="rejectReason"
+            class="order-detail-view__textarea"
+            rows="4"
+            maxlength="500"
+            placeholder="Ví dụ: Sản phẩm tạm thời hết hàng..."
+            :disabled="rejectSubmitting"
+          />
+          <div class="order-detail-view__char-count">
+            {{ rejectReason.length }} / 500
+          </div>
+
+          <template #footer>
+            <BaseButton variant="secondary" :disabled="rejectSubmitting" @click="showRejectModal = false">
+              Hủy
+            </BaseButton>
+            <BaseButton variant="danger" :disabled="rejectDisabled" :loading="rejectSubmitting" @click="submitReject">
+              Xác nhận từ chối
             </BaseButton>
           </template>
         </BaseModal>
@@ -905,6 +1038,18 @@ function badgeClass(status, toneMap) {
   margin: 0 0 var(--space-3);
   font-size: var(--font-sm);
   color: var(--color-text-secondary);
+}
+
+.order-detail-view__modal-hint {
+  margin: 0 0 var(--space-3);
+  font-size: var(--font-sm);
+  color: var(--color-text-secondary);
+}
+
+.order-detail-view__actions-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
 }
 
 .order-detail-view__textarea {

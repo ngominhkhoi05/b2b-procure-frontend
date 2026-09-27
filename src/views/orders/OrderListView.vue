@@ -7,12 +7,13 @@
  * Fetches paginated orders from the backend with optional status / payment
  * method filters. Renders a responsive table (desktop) or card list (mobile).
  */
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { listOrders } from '@/services/orderService'
 import {
   ORDER_STATUS_OPTIONS,
   PAYMENT_METHOD_OPTIONS,
+  SUPPLIER_STATUS_TABS,
   getOrderStatusLabel,
   getOrderStatusTone,
   getPaymentMethodLabel,
@@ -32,22 +33,31 @@ const router = useRouter()
 const auth = useAuthStore()
 const toast = useToastStore()
 
-// ── Guard — only BUYER may access this view ──────────────────────────────
+// ── Role ──────────────────────────────────────────────────────────────────
+// Support both `role` and `roleName` field shapes from auth store.
+const role = computed(() => auth.currentUser?.role ?? auth.currentUser?.roleName)
+
+const isBuyer    = computed(() => role.value === 'BUYER')
+const isSupplier = computed(() => role.value === 'SUPPLIER')
+
+// ── Guard — only BUYER or SUPPLIER may access this view ───────────────────
 onMounted(() => {
-  if (auth.currentUser?.role !== 'BUYER') {
+  if (role.value !== 'BUYER' && role.value !== 'SUPPLIER') {
     router.replace('/403')
   }
 })
 
 // ── Tabs ─────────────────────────────────────────────────────────────────
-const tabs = [
-  { key: '',                   label: 'Tất cả' },
+const BUYER_TABS = [
+  { key: '',                    label: 'Tất cả' },
   { key: 'PENDING_CONFIRMATION', label: 'Chờ xác nhận' },
   { key: 'PAID',               label: 'Đã thanh toán' },
   { key: 'CONFIRMED',          label: 'Đang xử lý' },
   { key: 'COMPLETED',          label: 'Hoàn thành' },
   { key: 'CANCELLED',          label: 'Đã hủy' },
 ]
+
+const tabs = computed(() => isBuyer.value ? BUYER_TABS : SUPPLIER_STATUS_TABS)
 
 // ── Filters & pagination state ───────────────────────────────────────────
 const filters = reactive({
@@ -143,8 +153,14 @@ function goToPage(p) {
     <!-- ── Header ───────────────────────────────────────────── -->
     <header class="order-list-view__header">
       <div>
-        <h1 class="order-list-view__title">Đơn hàng của tôi</h1>
-        <p class="order-list-view__subtitle">Quản lý và theo dõi đơn hàng</p>
+        <h1 class="order-list-view__title">
+          {{ isBuyer ? 'Đơn hàng của tôi' : 'Đơn hàng' }}
+        </h1>
+        <p class="order-list-view__subtitle">
+          {{ isBuyer
+              ? 'Theo dõi trạng thái đơn hàng bạn đã đặt.'
+              : 'Theo dõi và xử lý đơn hàng thuộc công ty bạn.' }}
+        </p>
       </div>
     </header>
 
@@ -224,10 +240,16 @@ function goToPage(p) {
     <!-- ── Empty ─────────────────────────────────────────────── -->
     <div v-else-if="orders.length === 0" class="order-list-view__state">
       <BaseEmpty
-        title="Bạn chưa có đơn hàng nào."
-        description="Hãy chọn sản phẩm và đặt đơn hàng đầu tiên."
+        :title="isBuyer ? 'Bạn chưa có đơn hàng nào.' : 'Chưa có đơn hàng nào.'"
+        :description="isBuyer
+          ? 'Hãy chọn sản phẩm và đặt đơn hàng đầu tiên.'
+          : undefined"
       >
-        <BaseButton variant="primary" @click="router.push('/products')">
+        <BaseButton
+          v-if="isBuyer"
+          variant="primary"
+          @click="router.push('/products')"
+        >
           Mua sắm
         </BaseButton>
       </BaseEmpty>
