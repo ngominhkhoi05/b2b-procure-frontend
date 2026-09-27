@@ -182,7 +182,11 @@ const cancelDisabled = computed(
 )
 
 const availableActions = computed(() =>
-  order.value ? getAvailableSupplierActions(order.value.status) : []
+  order.value
+    ? getAvailableSupplierActions(order.value.status, {
+        paymentMethod: order.value.payment?.paymentMethod ?? null,
+      })
+    : []
 )
 
 async function runSupplierAction(action) {
