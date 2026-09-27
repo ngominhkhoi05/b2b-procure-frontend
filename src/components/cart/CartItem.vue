@@ -6,16 +6,19 @@
  *   item       — CartItemResponse
  *   submitting — boolean  (true while the row's mutation is in flight;
  *                          disables quantity controls and the remove button)
+ *   selectable — boolean  (when true, render a leading checkbox)
+ *   selected   — boolean  (current checkbox state — controlled)
  *
  * Emits:
  *   update-quantity({ productId, quantity })
  *   remove(productId)
+ *   update:selected(boolean)   — emitted whenever the checkbox is toggled
  *
  * Notes:
  *   - All pricing values come from the backend.
  *   - When `available === false` we surface a warning chip and disable
- *     the controls. The backend is still the source of truth — even
- *     seemingly valid quantity updates will be rejected with 400.
+ *     the controls AND the checkbox. The backend is still the source of
+ *     truth — even seemingly valid quantity updates will be rejected with 400.
  */
 import { computed } from 'vue'
 import { formatCurrency, formatNumber } from '@/utils/format'
@@ -30,12 +33,21 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  selectable: {
+    type: Boolean,
+    default: false,
+  },
+  selected: {
+    type: Boolean,
+    default: false,
+  },
 })
 
-const emit = defineEmits(['update-quantity', 'remove'])
+const emit = defineEmits(['update-quantity', 'remove', 'update:selected'])
 
 const isAvailable = computed(() => Boolean(props.item.available))
 const hasUnitPrice = computed(() => props.item.unitPrice != null)
+const checkboxDisabled = computed(() => !isAvailable.value || props.submitting)
 
 const unavailableReason = computed(() => {
   const reasons = []
@@ -65,6 +77,10 @@ function onRemove() {
   emit('remove', props.item.productId)
 }
 
+function onCheckboxChange(e) {
+  emit('update:selected', e.target.checked)
+}
+
 function onImgError(e) {
   e.target.style.display = 'none'
   e.target.closest('.cart-item__thumb')?.classList.add('cart-item__thumb--no-image')
@@ -74,9 +90,32 @@ function onImgError(e) {
 <template>
   <article
     class="cart-item"
-    :class="{ 'cart-item--unavailable': !isAvailable }"
+    :class="{
+      'cart-item--unavailable': !isAvailable,
+      'cart-item--selectable': selectable,
+      'cart-item--selected': selectable && selected,
+    }"
     :aria-busy="submitting"
   >
+    <!-- Selection checkbox -->
+    <div v-if="selectable" class="cart-item__select">
+      <label class="cart-item__checkbox-label">
+        <input
+          type="checkbox"
+          class="cart-item__checkbox"
+          :checked="selected"
+          :disabled="checkboxDisabled"
+          :aria-label="`Chọn ${item.productName}`"
+          @change="onCheckboxChange"
+        />
+        <span class="cart-item__checkbox-visual" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="currentColor">
+            <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
+          </svg>
+        </span>
+      </label>
+    </div>
+
     <!-- Thumbnail -->
     <div class="cart-item__thumb-wrap">
       <div class="cart-item__thumb">
@@ -160,17 +199,96 @@ function onImgError(e) {
 .cart-item {
   position: relative;
   display: grid;
-  grid-template-columns: 100px minmax(0, 1fr) 180px;
+  grid-template-columns: auto 100px minmax(0, 1fr) 180px;
   gap: var(--space-4);
   padding: var(--space-4);
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
-  transition: border-color var(--transition-fast);
+  transition: border-color var(--transition-fast), background-color var(--transition-fast);
 }
 
-.cart-item--unavailable {
+.cart-item--selectable {
+  cursor: default;
+}
+
+.cart-item--selected {
+  border-color: var(--color-primary);
+  background-color: var(--color-primary-soft);
+}
+
+.cart-item--unavailable.cart-item--selected {
   border-color: var(--color-warning, #D97706);
+  background-color: var(--color-surface);
+}
+
+.cart-item__select {
+  display: flex;
+  align-items: flex-start;
+  padding-top: var(--space-1);
+}
+
+.cart-item__checkbox-label {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  cursor: pointer;
+}
+
+.cart-item__checkbox {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.cart-item__checkbox:disabled {
+  cursor: not-allowed;
+}
+
+.cart-item__checkbox-visual {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-sm);
+  border: 1.5px solid var(--color-border-strong);
+  background-color: var(--color-surface);
+  color: transparent;
+  transition:
+    background-color var(--transition-fast),
+    border-color var(--transition-fast),
+    color var(--transition-fast);
+  pointer-events: none;
+}
+
+.cart-item__checkbox-visual :deep(svg) {
+  width: 14px;
+  height: 14px;
+}
+
+.cart-item__checkbox:checked + .cart-item__checkbox-visual {
+  background-color: var(--color-primary);
+  border-color: var(--color-primary);
+  color: var(--color-text-inverse);
+}
+
+.cart-item__checkbox:disabled + .cart-item__checkbox-visual {
+  background-color: var(--color-surface-alt);
+  border-color: var(--color-border);
+  opacity: 0.5;
+}
+
+.cart-item__checkbox:focus-visible + .cart-item__checkbox-visual {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
 }
 
 .cart-item__thumb-wrap {
@@ -381,13 +499,18 @@ function onImgError(e) {
 
 @media (max-width: 720px) {
   .cart-item {
-    grid-template-columns: 80px minmax(0, 1fr);
+    grid-template-columns: auto 80px minmax(0, 1fr);
     grid-template-rows: auto auto;
   }
 
-  .cart-item__thumb-wrap {
+  .cart-item__select {
     grid-column: 1;
-    grid-row: 1 / span 2;
+    grid-row: 1;
+  }
+
+  .cart-item__thumb-wrap {
+    grid-column: 2;
+    grid-row: 1;
   }
 
   .cart-item__thumb {
@@ -396,12 +519,12 @@ function onImgError(e) {
   }
 
   .cart-item__main {
-    grid-column: 2;
+    grid-column: 3;
     grid-row: 1;
   }
 
   .cart-item__side {
-    grid-column: 2;
+    grid-column: 1 / span 3;
     grid-row: 2;
     flex-direction: row;
     align-items: center;
@@ -414,14 +537,19 @@ function onImgError(e) {
 
 @media (max-width: 480px) {
   .cart-item {
-    grid-template-columns: 1fr;
+    grid-template-columns: auto 1fr;
     gap: var(--space-3);
+  }
+
+  .cart-item__select {
+    grid-column: 1;
+    grid-row: 1;
   }
 
   .cart-item__thumb-wrap,
   .cart-item__main,
   .cart-item__side {
-    grid-column: 1;
+    grid-column: 2;
     grid-row: auto;
   }
 

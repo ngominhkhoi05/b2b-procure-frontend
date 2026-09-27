@@ -15,6 +15,8 @@ const APP_LAYOUT_NAMES = new Set([
   'products',
   'categories',
   'cart',
+  'checkout',
+  'checkout-result',
   'orders',
   'users',
   'companies',

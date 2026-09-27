@@ -3,15 +3,21 @@
  * CartSummary — totals + destructive actions for the cart.
  *
  * Props:
- *   cart      — CartResponse | null
- *   clearing  — boolean (true while the clear request is in flight)
+ *   cart        — CartResponse | null
+ *   clearing    — boolean (true while the clear request is in flight)
+ *   selectable  — boolean (Phase 6 — show the "Proceed to Checkout" CTA)
+ *   canCheckout — boolean (true iff at least one valid item is selected
+ *                          AND all selected items belong to one supplier)
+ *   checkoutHint — string | null  (human-readable hint shown when
+ *                                    canCheckout is false but items exist)
  *
  * Emits:
  *   clear()
+ *   checkout()  — only fired when canCheckout is true
  *
  * Notes:
  *   - All totals come from the backend.
- *   - The Checkout button is intentionally disabled — Phase 6 only.
+ *   - The real Checkout flow (COD + ZaloPay) is wired up in Phase 6.
  */
 import { computed } from 'vue'
 import { formatCurrency, formatNumber } from '@/utils/format'
@@ -26,9 +32,21 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  selectable: {
+    type: Boolean,
+    default: false,
+  },
+  canCheckout: {
+    type: Boolean,
+    default: false,
+  },
+  checkoutHint: {
+    type: String,
+    default: null,
+  },
 })
 
-defineEmits(['clear'])
+defineEmits(['clear', 'checkout'])
 
 const totalAmount = computed(() => props.cart?.totalAmount ?? null)
 const totalItems = computed(() => props.cart?.totalItems ?? 0)
@@ -60,12 +78,14 @@ const hasItems = computed(() => totalItems.value > 0)
 
     <div class="cart-summary__actions">
       <BaseButton
+        v-if="selectable && hasItems"
         variant="primary"
         block
-        disabled
-        title="Tính năng thanh toán sẽ có trong phiên bản tiếp theo"
+        :disabled="!canCheckout"
+        :title="!canCheckout && checkoutHint ? checkoutHint : 'Tiến hành thanh toán'"
+        @click="$emit('checkout')"
       >
-        Tiến hành thanh toán (sắp có)
+        Tiến hành thanh toán
       </BaseButton>
 
       <BaseButton

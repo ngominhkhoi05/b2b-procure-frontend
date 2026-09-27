@@ -37,6 +37,10 @@ const CategoryManagementView  = () => import('@/views/categories/CategoryManagem
 // ── Phase 5 — Cart view ──────────────────────────────────────────────────
 const CartView = () => import('@/views/cart/CartView.vue')
 
+// ── Phase 6 — Checkout & Payment views ───────────────────────────────────
+const CheckoutView       = () => import('@/views/checkout/CheckoutView.vue')
+const CheckoutResultView = () => import('@/views/checkout/CheckoutResultView.vue')
+
 // ── Route definitions ─────────────────────────────────────────────────────────
 
 const routes = [
@@ -191,6 +195,26 @@ const routes = [
       requiresAuth: true,
       roles: ['BUYER'],
       title: 'Giỏ hàng',
+    },
+  },
+  {
+    path: '/checkout',
+    name: 'checkout',
+    component: CheckoutView,
+    meta: {
+      requiresAuth: true,
+      roles: ['BUYER'],
+      title: 'Thanh toán',
+    },
+  },
+  {
+    path: '/checkout/result',
+    name: 'checkout-result',
+    component: CheckoutResultView,
+    meta: {
+      requiresAuth: true,
+      roles: ['BUYER'],
+      title: 'Kết quả thanh toán',
     },
   },
   {
