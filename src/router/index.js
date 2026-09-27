@@ -237,7 +237,7 @@ const routes = [
     component: OrderDetailView,
     meta: {
       requiresAuth: true,
-      roles: ['BUYER'],
+      roles: ['ADMIN', 'BUYER', 'SUPPLIER'],
       title: 'Chi tiết đơn hàng',
     },
   },

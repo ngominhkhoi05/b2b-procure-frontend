@@ -61,7 +61,7 @@ const NAV_BY_ROLE = {
     { to: '/dashboard', label: 'Bảng điều khiển', icon: 'dashboard' },
     { to: '/products',  label: 'Sản phẩm',        icon: 'package' },
     { to: '/categories',label: 'Danh mục',        icon: 'folder' },
-    { to: '/orders',    label: 'Đơn hàng',        icon: 'receipt',   placeholder: true },
+    { to: '/orders',    label: 'Đơn hàng',        icon: 'receipt' },
     { to: '/profile',   label: 'Hồ sơ',           icon: 'user' },
   ],
   BUYER: [

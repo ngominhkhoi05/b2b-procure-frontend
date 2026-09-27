@@ -176,3 +176,75 @@ export function getPaymentStatusLabel(status) {
 export function getPaymentStatusTone(status) {
   return PAYMENT_STATUS_TONE[status] ?? 'neutral'
 }
+
+// ─── Supplier-specific helpers ────────────────────────────────────────────────
+
+/**
+ * Tab options for the SUPPLIER order-list filter bar.
+ * Keys map 1:1 to the backend `status` query parameter accepted by
+ * `GET /api/v1/orders` (single-value enum string per request).
+ *
+ * @type {{ key: string, label: string }[]}
+ */
+export const SUPPLIER_STATUS_TABS = [
+  { key: '',                    label: 'Tất cả' },
+  { key: 'PENDING_CONFIRMATION', label: 'Chờ xác nhận' },
+  { key: 'CONFIRMED',           label: 'Đã xác nhận' },
+  { key: 'PREPARING',           label: 'Đang chuẩn bị' },
+  { key: 'SHIPPING',            label: 'Đang giao' },
+  { key: 'COMPLETED',           label: 'Hoàn thành' },
+  { key: 'REJECTED',            label: 'Bị từ chối' },
+  { key: 'CANCELLED',           label: 'Đã hủy' },
+]
+
+/**
+ * Supplier lifecycle action table.
+ *
+ * This table only controls which buttons are rendered in the UI.
+ * The backend is the authoritative source for which transitions are valid —
+ * it will return 409 / 422 for invalid transitions (e.g. Confirm on a
+ * PENDING_CONFIRMATION order that has already timed out, or Confirm on a PAID
+ * order with COD where the buyer has already paid online). The actions card
+ * is refreshed after every action by re-fetching the full order detail, so
+ * stale state is handled automatically.
+ *
+ * @typedef {Object} SupplierOrderAction
+ * @property {'confirm'|'reject'|'preparing'|'shipping'|'complete'} key
+ * @property {string}  label     Vietnamese button label
+ * @property {'primary'|'danger'} variant
+ * @property {boolean} [requiresReason]  true when the backend requires a reason body
+ *
+ * @type {Record<string, SupplierOrderAction[]>}
+ */
+export const SUPPLIER_AVAILABLE_ACTIONS = {
+  PENDING_CONFIRMATION: [
+    { key: 'confirm', label: 'Xác nhận đơn hàng', variant: 'primary' },
+    { key: 'reject',  label: 'Từ chối đơn hàng',  variant: 'danger', requiresReason: true },
+  ],
+  PAID: [
+    { key: 'reject',  label: 'Từ chối & hoàn tiền', variant: 'danger', requiresReason: true },
+  ],
+  CONFIRMED: [
+    { key: 'preparing', label: 'Đánh dấu đang chuẩn bị', variant: 'primary' },
+  ],
+  PREPARING: [
+    { key: 'shipping', label: 'Đánh dấu đang giao',    variant: 'primary' },
+  ],
+  SHIPPING: [
+    { key: 'complete', label: 'Đánh dấu hoàn thành',    variant: 'primary' },
+  ],
+  COMPLETED: [],
+  REJECTED:  [],
+  CANCELLED: [],
+}
+
+/**
+ * Returns the array of supplier actions for the given order status.
+ * Falls back to an empty array for unknown statuses.
+ *
+ * @param {string} status
+ * @returns {SupplierOrderAction[]}
+ */
+export function getAvailableSupplierActions(status) {
+  return SUPPLIER_AVAILABLE_ACTIONS[status] ?? []
+}
