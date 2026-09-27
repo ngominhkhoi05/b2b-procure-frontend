@@ -34,6 +34,9 @@ const ProductDetailView       = () => import('@/views/products/ProductDetailView
 const ProductFormView         = () => import('@/views/products/ProductFormView.vue')
 const CategoryManagementView  = () => import('@/views/categories/CategoryManagementView.vue')
 
+// ── Phase 5 — Cart view ──────────────────────────────────────────────────
+const CartView = () => import('@/views/cart/CartView.vue')
+
 // ── Route definitions ─────────────────────────────────────────────────────────
 
 const routes = [
@@ -183,7 +186,7 @@ const routes = [
   {
     path: '/cart',
     name: 'cart',
-    component: ProfileView,
+    component: CartView,
     meta: {
       requiresAuth: true,
       roles: ['BUYER'],
