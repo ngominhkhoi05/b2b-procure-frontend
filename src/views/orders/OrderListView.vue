@@ -1,15 +1,18 @@
 <script setup>
 /**
- * OrderListView — Buyer order list.
+ * OrderListView — role-aware order list.
  *
- * BUYER-only: on mount, non-BUYER role redirects to /403.
+ * Supports BUYER, SUPPLIER, and ADMIN (read-only). The same view is used
+ * for all three roles; the load function picks the right endpoint based
+ * on the authenticated principal.
  *
- * Fetches paginated orders from the backend with optional status / payment
- * method filters. Renders a responsive table (desktop) or card list (mobile).
+ *   BUYER    → /api/v1/orders       (own orders)
+ *   SUPPLIER → /api/v1/orders       (orders containing own products)
+ *   ADMIN   → /api/v1/admin/orders (all orders, full visibility)
  */
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { listOrders } from '@/services/orderService'
+import { listOrders, listAdminOrders } from '@/services/orderService'
 import {
   ORDER_STATUS_OPTIONS,
   PAYMENT_METHOD_OPTIONS,
@@ -39,10 +42,11 @@ const role = computed(() => auth.currentUser?.role ?? auth.currentUser?.roleName
 
 const isBuyer    = computed(() => role.value === 'BUYER')
 const isSupplier = computed(() => role.value === 'SUPPLIER')
+const isAdmin    = computed(() => role.value === 'ADMIN')
 
-// ── Guard — only BUYER or SUPPLIER may access this view ───────────────────
+// ── Guard — only BUYER, SUPPLIER, or ADMIN may access this view ───────────
 onMounted(() => {
-  if (role.value !== 'BUYER' && role.value !== 'SUPPLIER') {
+  if (!isBuyer.value && !isSupplier.value && !isAdmin.value) {
     router.replace('/403')
   }
 })
@@ -57,7 +61,21 @@ const BUYER_TABS = [
   { key: 'CANCELLED',          label: 'Đã hủy' },
 ]
 
-const tabs = computed(() => isBuyer.value ? BUYER_TABS : SUPPLIER_STATUS_TABS)
+// Admin sees a simpler set of status buckets. The shared `OrderStatus`
+// enum is reused, so the backend filter values are unchanged.
+const ADMIN_TABS = [
+  { key: '',                    label: 'Tất cả' },
+  { key: 'PENDING_CONFIRMATION', label: 'Chờ xác nhận' },
+  { key: 'COMPLETED',          label: 'Hoàn thành' },
+  { key: 'REJECTED',           label: 'Bị từ chối' },
+  { key: 'CANCELLED',          label: 'Đã hủy' },
+]
+
+const tabs = computed(() => {
+  if (isAdmin.value)    return ADMIN_TABS
+  if (isBuyer.value)    return BUYER_TABS
+  return SUPPLIER_STATUS_TABS
+})
 
 // ── Filters & pagination state ───────────────────────────────────────────
 const filters = reactive({
@@ -92,13 +110,17 @@ async function load() {
       size: filters.size,
       sort: 'createdAt,desc',
     }
-    if (filters.status) params.status = filters.status
+    if (filters.status)        params.status        = filters.status
     if (filters.paymentMethod) params.paymentMethod = filters.paymentMethod
     if (filters.paymentStatus) params.paymentStatus = filters.paymentStatus
-    // fromDate / toDate intentionally excluded from Phase 7 request
-    // to keep scope tight — backend accepts them when wired in future phases
+    // fromDate / toDate are accepted by both /orders and /admin/orders.
+    // Wire them whenever the user has picked a date.
+    if (filters.fromDate)      params.fromDate      = filters.fromDate
+    if (filters.toDate)        params.toDate        = filters.toDate
 
-    const data = await listOrders(params)
+    const data = isAdmin.value
+      ? await listAdminOrders(params)
+      : await listOrders(params)
     orders.value = data.content || []
     pageData.value = {
       pageNo: data.pageNo,
@@ -154,12 +176,16 @@ function goToPage(p) {
     <header class="order-list-view__header">
       <div>
         <h1 class="order-list-view__title">
-          {{ isBuyer ? 'Đơn hàng của tôi' : 'Đơn hàng' }}
+          {{ isAdmin
+              ? 'Tất cả đơn hàng'
+              : (isBuyer ? 'Đơn hàng của tôi' : 'Đơn hàng') }}
         </h1>
         <p class="order-list-view__subtitle">
-          {{ isBuyer
-              ? 'Theo dõi trạng thái đơn hàng bạn đã đặt.'
-              : 'Theo dõi và xử lý đơn hàng thuộc công ty bạn.' }}
+          {{ isAdmin
+              ? 'Tổng quan đơn hàng trên toàn hệ thống (chỉ xem).'
+              : (isBuyer
+                  ? 'Theo dõi trạng thái đơn hàng bạn đã đặt.'
+                  : 'Theo dõi và xử lý đơn hàng thuộc công ty bạn.') }}
         </p>
       </div>
     </header>
@@ -240,7 +266,9 @@ function goToPage(p) {
     <!-- ── Empty ─────────────────────────────────────────────── -->
     <div v-else-if="orders.length === 0" class="order-list-view__state">
       <BaseEmpty
-        :title="isBuyer ? 'Bạn chưa có đơn hàng nào.' : 'Chưa có đơn hàng nào.'"
+        :title="isAdmin
+          ? 'Chưa có đơn hàng nào trên hệ thống.'
+          : (isBuyer ? 'Bạn chưa có đơn hàng nào.' : 'Chưa có đơn hàng nào.')"
         :description="isBuyer
           ? 'Hãy chọn sản phẩm và đặt đơn hàng đầu tiên.'
           : undefined"
@@ -266,6 +294,7 @@ function goToPage(p) {
               <th scope="col">Ngày tạo</th>
               <th scope="col">Tổng tiền</th>
               <th scope="col">Thanh toán</th>
+              <th v-if="isAdmin" scope="col">Người tạo</th>
               <th scope="col">Trạng thái</th>
             </tr>
           </thead>
@@ -287,6 +316,7 @@ function goToPage(p) {
               <td>{{ order.createdAt ? formatDateTime(order.createdAt) : '—' }}</td>
               <td>{{ order.totalAmount != null ? formatCurrency(order.totalAmount) : '—' }}</td>
               <td>{{ order.paymentMethod ? getPaymentMethodLabel(order.paymentMethod) : '—' }}</td>
+              <td v-if="isAdmin">#{{ order.createdBy ?? '—' }}</td>
               <td>
                 <span
                   class="order-list-view__badge order-list-view__badge--{{ getOrderStatusTone(order.status) }}"
@@ -334,6 +364,9 @@ function goToPage(p) {
               </div>
               <div v-if="order.paymentMethod" class="order-list-view__card-payment">
                 {{ getPaymentMethodLabel(order.paymentMethod) }}
+              </div>
+              <div v-if="isAdmin" class="order-list-view__card-creator">
+                Mã người tạo: <strong>#{{ order.createdBy ?? '—' }}</strong>
               </div>
             </div>
 
@@ -640,6 +673,16 @@ function goToPage(p) {
 .order-list-view__card-payment {
   font-size: var(--font-sm);
   color: var(--color-text-muted);
+}
+
+.order-list-view__card-creator {
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+}
+
+.order-list-view__card-creator strong {
+  color: var(--color-text-secondary);
+  font-weight: var(--weight-semibold);
 }
 
 .order-list-view__card-link {

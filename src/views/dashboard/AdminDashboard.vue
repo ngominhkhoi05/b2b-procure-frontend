@@ -13,7 +13,7 @@
 import { ref, onMounted } from 'vue'
 import { getStatisticsOverview } from '@/services/adminService'
 import { listOrders } from '@/services/orderService'
-import { formatCurrency, formatNumber } from '@/utils/format'
+import { formatCurrency, formatDate, formatNumber } from '@/utils/format'
 
 import DashboardSection from '@/components/dashboard/DashboardSection.vue'
 import DashboardCard from '@/components/dashboard/DashboardCard.vue'
@@ -32,9 +32,12 @@ async function loadStats() {
   statsLoading.value = true
   statsError.value = null
   try {
-    stats.value = await getStatisticsOverview()
+    const data = await getStatisticsOverview()
+    stats.value = data
+    updateRangeLabel(data)
   } catch (err) {
     statsError.value = err
+    statsRangeLabel.value = null
   } finally {
     statsLoading.value = false
   }
@@ -65,6 +68,24 @@ function toNumber(v) {
   return isNaN(n) ? 0 : n
 }
 
+// Build a short caption showing the date range echoed back by the
+// statistics endpoint. Returns null when no range is present so the
+// caption can be hidden cleanly.
+const statsRangeLabel = ref(null)
+
+function updateRangeLabel(s) {
+  if (!s) {
+    statsRangeLabel.value = null
+    return
+  }
+  const from = s.fromDate ? formatDate(s.fromDate) : null
+  const to   = s.toDate   ? formatDate(s.toDate)   : null
+  if (from && to)       statsRangeLabel.value = `Khoảng thống kê: ${from} → ${to}`
+  else if (from)        statsRangeLabel.value = `Khoảng thống kê: từ ${from}`
+  else if (to)          statsRangeLabel.value = `Khoảng thống kê: đến ${to}`
+  else                  statsRangeLabel.value = null
+}
+
 const ICON_RECEIPT = 'M19 3H5c-1.1 0-2 .9-2 2v16l4-4h12c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 14H6.17L4 17V5h16v12zM7 7h10v2H7zm0 4h10v2H7z'
 const ICON_CHECK   = 'M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z'
 const ICON_CLOCK   = 'M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z'
@@ -76,6 +97,9 @@ const ICON_BLOCK   = 'M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52
   <div class="admin-dashboard">
     <!-- KPI grid -->
     <DashboardSection title="Tổng quan hệ thống" subtitle="Số liệu thống kê từ backend">
+      <template v-if="statsRangeLabel" #actions>
+        <span class="admin-dashboard__range">{{ statsRangeLabel }}</span>
+      </template>
       <div class="admin-dashboard__kpis">
         <DashboardCard
           label="Tổng đơn hàng"
@@ -164,5 +188,19 @@ const ICON_BLOCK   = 'M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: var(--space-4);
+}
+
+.admin-dashboard__range {
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-full);
+  background: var(--color-surface-alt);
+  border: 1px solid var(--color-border);
+  font-size: var(--font-xs);
+  font-weight: var(--weight-medium);
+  color: var(--color-text-secondary);
+  white-space: nowrap;
 }
 </style>
