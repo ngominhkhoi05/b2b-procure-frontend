@@ -156,8 +156,8 @@ function onKeydown(e) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
+  width: 32px;
+  height: 32px;
   background: transparent;
   color: var(--color-text-secondary);
   transition:
@@ -176,13 +176,13 @@ function onKeydown(e) {
 }
 
 .qty-control__btn :deep(svg) {
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
 }
 
 .qty-control__input {
-  width: 60px;
-  height: 36px;
+  width: 52px;
+  height: 32px;
   border: none;
   border-left: 1px solid var(--color-border);
   border-right: 1px solid var(--color-border);

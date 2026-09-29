@@ -315,6 +315,7 @@ function onCheckout() {
       <BaseButton
         v-if="cart && cart.totalItems > 0 && !loading"
         variant="ghost"
+        class="cart-view__clear-link"
         @click="openClearModal"
       >
         Xóa toàn bộ
@@ -368,11 +369,9 @@ function onCheckout() {
       <div class="cart-view__aside">
         <CartSummary
           :cart="cart"
-          :clearing="clearing"
           selectable
           :can-checkout="canCheckout"
           :checkout-hint="checkoutHint"
-          @clear="openClearModal"
           @checkout="onCheckout"
         />
       </div>
@@ -437,6 +436,31 @@ function onCheckout() {
   margin: 0;
   font-size: var(--font-sm);
   color: var(--color-text-secondary);
+}
+
+/* Top-right "Xóa toàn bộ" — visually a low-emphasis text link, not a button. */
+.cart-view__clear-link {
+  min-height: auto;
+  padding: 0;
+  font-size: var(--font-sm);
+  font-weight: var(--weight-medium);
+  color: var(--color-text-muted);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: transparent;
+  transition:
+    color var(--transition-fast),
+    text-decoration-color var(--transition-fast);
+}
+
+.cart-view__clear-link:hover:not(:disabled) {
+  background: transparent;
+  color: var(--color-danger);
+  text-decoration-color: currentColor;
+}
+
+.cart-view__clear-link:active:not(:disabled) {
+  background: transparent;
 }
 
 .cart-view__state {

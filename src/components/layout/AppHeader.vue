@@ -4,7 +4,7 @@
  *
  * Layout:
  *   ┌─────────────────────────────────────────────┐
- *   │ ☰   B2B Procure           🛒 Cart     User ▼ │
+ *   │ ☰                          🛒 Cart   User ▼ │
  *   └─────────────────────────────────────────────┘
  *
  * The toggle button is always visible. On desktop it collapses the
@@ -13,6 +13,9 @@
  * The cart icon + count chip is only rendered for BUYER users — the
  * cart API is BUYER-only server-side (CartController has class-level
  * @PreAuthorize("hasRole('BUYER')")).
+ *
+ * The brand wordmark "B2B Procure" lives in the sidebar, so the top
+ * bar intentionally does NOT duplicate it here.
  */
 
 import { computed, onMounted, watch } from 'vue'
@@ -74,8 +77,6 @@ onMounted(() => {
         <path d="M3 6h18v2H3V6zm0 5h18v2H3v-2zm0 5h18v2H3v-2z"/>
       </svg>
     </button>
-
-    <span class="app-header__brand">B2B Procure</span>
 
     <div class="app-header__spacer" />
 
@@ -142,12 +143,6 @@ onMounted(() => {
   height: 20px;
 }
 
-.app-header__brand {
-  font-size: var(--font-md);
-  font-weight: var(--weight-semibold);
-  color: var(--color-text-primary);
-}
-
 .app-header__cart {
   position: relative;
   display: inline-flex;
@@ -211,10 +206,6 @@ onMounted(() => {
 @media (max-width: 640px) {
   .app-header {
     padding: 0 var(--space-3);
-  }
-
-  .app-header__brand {
-    display: none;
   }
 }
 </style>
