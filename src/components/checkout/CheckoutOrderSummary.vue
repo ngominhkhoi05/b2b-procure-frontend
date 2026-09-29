@@ -92,11 +92,6 @@ function onSubmit() {
         <dd>{{ formatCurrency(subtotal) }}</dd>
       </div>
 
-      <div class="checkout-summary__row">
-        <dt>Phí vận chuyển</dt>
-        <dd class="checkout-summary__muted">Tính sau</dd>
-      </div>
-
       <div class="checkout-summary__row checkout-summary__row--total">
         <dt>Tổng cộng</dt>
         <dd>
@@ -134,6 +129,11 @@ function onSubmit() {
           <span class="checkout-method__name">Thanh toán khi nhận hàng (COD)</span>
           <span class="checkout-method__desc">Thanh toán bằng tiền mặt cho đơn vị vận chuyển.</span>
         </span>
+        <span class="checkout-method__check" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="currentColor">
+            <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
+          </svg>
+        </span>
       </label>
 
       <label
@@ -156,6 +156,11 @@ function onSubmit() {
         <span class="checkout-method__body">
           <span class="checkout-method__name">ZaloPay</span>
           <span class="checkout-method__desc">Thanh toán trực tuyến qua cổng ZaloPay.</span>
+        </span>
+        <span class="checkout-method__check" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="currentColor">
+            <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
+          </svg>
         </span>
       </label>
     </fieldset>
@@ -285,7 +290,7 @@ function onSubmit() {
 .checkout-method {
   position: relative;
   display: grid;
-  grid-template-columns: 40px 1fr;
+  grid-template-columns: 40px 1fr auto;
   align-items: center;
   gap: var(--space-3);
   padding: var(--space-3);
@@ -293,22 +298,34 @@ function onSubmit() {
   border-radius: var(--radius-md);
   background: var(--color-surface);
   cursor: pointer;
-  transition: border-color var(--transition-fast), background-color var(--transition-fast);
+  transition:
+    border-color var(--transition-fast),
+    background-color var(--transition-fast),
+    box-shadow var(--transition-fast);
 }
 
 .checkout-method:hover {
   border-color: var(--color-primary);
+  background-color: var(--color-surface);
 }
 
 .checkout-method--active {
   border-color: var(--color-primary);
+  border-width: 2px;
+  padding: calc(var(--space-3) - 1px); /* compensate for thicker border so layout doesn't shift */
   background: var(--color-primary-soft);
+  box-shadow: 0 0 0 3px var(--color-primary-soft);
 }
 
 .checkout-method__radio {
   position: absolute;
   opacity: 0;
   pointer-events: none;
+}
+
+.checkout-method__radio:focus-visible + .checkout-method__visual {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
 }
 
 .checkout-method__visual {
@@ -320,6 +337,9 @@ function onSubmit() {
   background: var(--color-surface-alt);
   color: var(--color-text-secondary);
   border-radius: var(--radius-md);
+  transition:
+    background-color var(--transition-fast),
+    color var(--transition-fast);
 }
 
 .checkout-method__visual :deep(svg) {
@@ -349,6 +369,33 @@ function onSubmit() {
   font-size: var(--font-xs);
   color: var(--color-text-muted);
   line-height: var(--leading-snug);
+}
+
+/* "Đã chọn" check indicator — visible only on active method. */
+.checkout-method__check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-full);
+  background: var(--color-primary);
+  color: var(--color-text-inverse);
+  opacity: 0;
+  transform: scale(0.6);
+  transition:
+    opacity var(--transition-fast),
+    transform var(--transition-fast);
+}
+
+.checkout-method__check :deep(svg) {
+  width: 14px;
+  height: 14px;
+}
+
+.checkout-method--active .checkout-method__check {
+  opacity: 1;
+  transform: scale(1);
 }
 
 .checkout-summary__expiry {

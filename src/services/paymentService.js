@@ -41,6 +41,27 @@ export async function createZaloPayPayment({ paymentId, orderId }) {
 }
 
 /**
+ * Re-initiate ZaloPay payment from the Order Detail page.
+ *
+ * Backend endpoint:
+ *   POST /api/v1/orders/{orderId}/payments/zalopay/retry
+ *
+ * Used when a buyer closes the ZaloPay tab by accident and wants to resume
+ * payment for an order whose status is still PENDING. The backend looks up
+ * the latest PENDING ZaloPay Payment for the order and delegates to the
+ * same idempotent `ZaloPayService.initiatePayment` used by checkout, so a
+ * second call returns the existing ZaloPay URL instead of creating a new
+ * order on ZaloPay.
+ *
+ * @param {number} orderId
+ * @returns {Promise<ZaloPayCreatePaymentResponse>}
+ */
+export async function retryOrderZaloPay(orderId) {
+  const response = await api.post(`/orders/${orderId}/payments/zalopay/retry`)
+  return response.data.data
+}
+
+/**
  * @typedef {Object} ZaloPayCreatePaymentRequest
  * @property {number} paymentId
  * @property {number} orderId
