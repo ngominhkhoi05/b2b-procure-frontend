@@ -17,6 +17,7 @@
 import { reactive, computed, watch } from 'vue'
 import BaseInput from '@/components/common/BaseInput.vue'
 import BaseSelect from '@/components/common/BaseSelect.vue'
+import BaseImageUploader from '@/components/common/BaseImageUploader.vue'
 
 const props = defineProps({
   initialProduct: {
@@ -247,15 +248,20 @@ function getError(field) {
         :disabled="submitting"
         @update:modelValue="clearFieldError('stockQuantity')"
       />
+    </div>
 
-      <BaseInput
-        v-model="form.imageUrl"
-        label="URL hình ảnh"
-        placeholder="https://..."
+    <!-- Product image: file-based upload via Cloudinary. The component
+         pushes the resulting URL back into form.imageUrl, which is what
+         onSubmit() forwards to the backend. -->
+    <div class="product-form__field product-form__field--full">
+      <BaseImageUploader
+        v-model:url="form.imageUrl"
+        variant="product"
+        label="Hình ảnh sản phẩm"
+        alt-text="Ảnh sản phẩm hiện tại"
         :error="getError('imageUrl')"
         :disabled="submitting"
-        autocomplete="off"
-        @update:modelValue="clearFieldError('imageUrl')"
+        help="PNG, JPG, WEBP hoặc GIF. Tối đa 5 MB. Ảnh sẽ được lưu trên Cloudinary CDN."
       />
     </div>
 

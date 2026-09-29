@@ -36,6 +36,7 @@ import BaseError from '@/components/common/BaseError.vue'
 import BaseInput from '@/components/common/BaseInput.vue'
 import BaseButton from '@/components/common/BaseButton.vue'
 import BaseModal from '@/components/common/BaseModal.vue'
+import BaseImageUploader from '@/components/common/BaseImageUploader.vue'
 
 const auth = useAuthStore()
 const toast = useToastStore()
@@ -378,16 +379,24 @@ onMounted(() => {
             placeholder="Số điện thoại liên hệ"
             :error="profileErrors.phone"
           />
-          <BaseInput
-            v-model="profileForm.avatarUrl"
-            label="URL ảnh đại diện"
-            placeholder="https://..."
+
+          <!-- Avatar: file-based upload via Cloudinary, with the resulting
+               URL kept in profileForm.avatarUrl so saveProfile() submits it
+               to the existing PUT /users/me endpoint unchanged. -->
+          <BaseImageUploader
+            v-model:url="profileForm.avatarUrl"
+            variant="avatar"
+            label="Ảnh đại diện"
+            alt-text="Ảnh đại diện hiện tại"
             :error="profileErrors.avatarUrl"
           />
-          <BaseInput
-            v-model="profileForm.coverImageUrl"
-            label="URL ảnh bìa"
-            placeholder="https://..."
+
+          <!-- Cover image: same flow as avatar but with the wide preview shape. -->
+          <BaseImageUploader
+            v-model:url="profileForm.coverImageUrl"
+            variant="cover"
+            label="Ảnh bìa"
+            alt-text="Ảnh bìa hiện tại"
             :error="profileErrors.coverImageUrl"
           />
         </div>
