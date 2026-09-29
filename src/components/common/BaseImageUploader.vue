@@ -29,6 +29,9 @@
  *   shape             — 'square' (avatar) | 'wide' (cover/product)
  *   maxBytes          — local pre-validation, default 5 MB
  *   altText           — alt text for the preview image
+ *   bare              — when true, only render the preview (no label,
+ *                       help text, or action buttons). Parent is
+ *                       expected to wire up its own controls.
  *
  * Emits:
  *   update:url        — emitted with the new URL after successful upload
@@ -79,6 +82,13 @@ const props = defineProps({
   altText: {
     type: String,
     default: 'Preview',
+  },
+  // Bare mode renders ONLY the preview area. No label, no help text,
+  // no action buttons. Parent must provide its own file input /
+  // upload wiring. Default false to preserve existing behaviour.
+  bare: {
+    type: Boolean,
+    default: false,
   },
 })
 
@@ -164,7 +174,7 @@ async function onFileChange(event) {
       { 'base-image-uploader--disabled': disabled, 'base-image-uploader--error': error || localError }
     ]"
   >
-    <label v-if="label" class="base-image-uploader__label">{{ label }}</label>
+    <label v-if="label && !bare" class="base-image-uploader__label">{{ label }}</label>
 
     <div class="base-image-uploader__preview-wrap">
       <!-- Preview / placeholder -->
@@ -198,7 +208,7 @@ async function onFileChange(event) {
       </div>
 
       <!-- Action buttons -->
-      <div class="base-image-uploader__actions">
+      <div v-if="!bare" class="base-image-uploader__actions">
         <button
           type="button"
           class="base-image-uploader__btn base-image-uploader__btn--primary"
@@ -232,7 +242,7 @@ async function onFileChange(event) {
     <p v-if="localError || error" class="base-image-uploader__error" role="alert">
       {{ localError || error }}
     </p>
-    <p v-else-if="help" class="base-image-uploader__help">{{ help }}</p>
+    <p v-else-if="help && !bare" class="base-image-uploader__help">{{ help }}</p>
   </div>
 </template>
 
