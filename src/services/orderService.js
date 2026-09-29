@@ -221,6 +221,73 @@ export async function completeSupplierOrder(id) {
  */
 
 /**
+ * Fetch a paginated list of ALL orders (ADMIN-only).
+ *
+ * Backend endpoint:
+ *   GET /api/v1/admin/orders
+ *
+ * Backend enforces `@PreAuthorize("hasRole('ADMIN')")` at the controller
+ * level. The response shape and query parameters are identical to the
+ * shared `/api/v1/orders` list endpoint, so the same `OrderResponse`
+ * shape is returned.
+ *
+ * @param {{
+ *   status?: string,
+ *   paymentMethod?: string,
+ *   paymentStatus?: string,
+ *   fromDate?: string,
+ *   toDate?: string,
+ *   page?: number,
+ *   size?: number,
+ *   sort?: string,
+ * }} [params]
+ * @returns {Promise<PageResponse<OrderResponse>>}
+ */
+export async function listAdminOrders(params = {}) {
+  const {
+    status,
+    paymentMethod,
+    paymentStatus,
+    fromDate,
+    toDate,
+    page = 0,
+    size = 20,
+    sort = 'createdAt,desc',
+  } = params
+
+  const queryParams = { page, size, sort }
+  if (status)        queryParams.status        = status
+  if (paymentMethod) queryParams.paymentMethod = paymentMethod
+  if (paymentStatus) queryParams.paymentStatus = paymentStatus
+  if (fromDate)      queryParams.fromDate      = fromDate
+  if (toDate)        queryParams.toDate        = toDate
+
+  const response = await api.get('/admin/orders', { params: queryParams })
+  return response.data.data
+}
+
+/**
+ * Fetch a single order by id as ADMIN (full visibility).
+ *
+ * Backend endpoint:
+ *   GET /api/v1/admin/orders/{id}
+ *
+ * Returns the same `OrderDetailResponse` shape as the shared endpoint,
+ * including items, status history, payment summary, and both
+ * `buyerCompanyName` / `supplierCompanyName` so ADMIN can inspect
+ * the order from both sides.
+ *
+ * Used by the Admin order detail view in read-only mode.
+ *
+ * @param {number|string} id
+ * @returns {Promise<OrderDetailResponse>}
+ */
+export async function getAdminOrderById(id) {
+  const response = await api.get(`/admin/orders/${id}`)
+  return response.data.data
+}
+
+/**
  * @typedef {Object} OrderDetailResponse
  * @extends OrderResponse
  * @property {OrderItemResponse[]}        items

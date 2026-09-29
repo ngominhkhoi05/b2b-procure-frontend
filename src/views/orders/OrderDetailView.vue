@@ -1,10 +1,15 @@
 <script setup>
 /**
- * OrderDetailView — Buyer order detail page.
+ * OrderDetailView — role-aware order detail page.
  *
- * BUYER-only: redirects to /403 if the current user is not a BUYER.
- * Loads order detail + status-change history in parallel on mount.
- * Supports cancellation with a reason (BUYER-gated by status).
+ * Supports BUYER, SUPPLIER, and ADMIN (read-only). The same view is used
+ * for all three roles; the load function picks the right endpoint based
+ * on the authenticated principal, and the template hides buyer/supplier
+ * mutation actions for ADMIN.
+ *
+ *   BUYER    → /api/v1/orders/{id}        (cancel action allowed)
+ *   SUPPLIER → /api/v1/orders/{id}        (lifecycle actions allowed)
+ *   ADMIN    → /api/v1/admin/orders/{id}  (read-only, both parties shown)
  */
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -28,6 +33,7 @@ import {
   markOrderPreparing,
   markOrderShipping,
   completeSupplierOrder,
+  getAdminOrderById,
 } from '@/services/orderService'
 import { useAuthStore } from '@/stores/auth'
 import { useToastStore } from '@/stores/toast'
@@ -68,9 +74,10 @@ const actionSubmitting = ref('')
 const role = computed(() => auth.currentUser?.role ?? auth.currentUser?.roleName)
 const isBuyer    = computed(() => role.value === 'BUYER')
 const isSupplier = computed(() => role.value === 'SUPPLIER')
+const isAdmin    = computed(() => role.value === 'ADMIN')
 
 onMounted(() => {
-  if (role.value !== 'BUYER' && role.value !== 'SUPPLIER') {
+  if (!isBuyer.value && !isSupplier.value && !isAdmin.value) {
     router.replace('/403')
     return
   }
@@ -81,7 +88,7 @@ onMounted(() => {
 watch(
   () => route.params.id,
   () => {
-    if (!isBuyer.value && !isSupplier.value) return
+    if (!isBuyer.value && !isSupplier.value && !isAdmin.value) return
     load()
   }
 )
@@ -97,7 +104,9 @@ async function load() {
     const orderId = Number(route.params.id)
 
     const [orderData, historyData] = await Promise.all([
-      getOrderById(orderId),
+      isAdmin.value
+        ? getAdminOrderById(orderId)
+        : getOrderById(orderId),
       getOrderHistory(orderId).catch((err) => {
         historyError.value = err
         toast.warning('Không thể tải lịch sử trạng thái. Vui lòng thử lại sau.')
@@ -311,6 +320,16 @@ function badgeClass(status, toneMap) {
           </div>
         </header>
 
+        <!-- ── Admin read-only notice ─────────────────────────── -->
+        <section v-if="isAdmin" class="order-detail-view__readonly-banner" role="status">
+          <span class="order-detail-view__readonly-dot" aria-hidden="true" />
+          <p class="order-detail-view__readonly-text">
+            <strong>Chế độ xem.</strong>
+            Admin chỉ có quyền truy cập đọc. Mọi thao tác thay đổi trạng thái đơn hàng
+            thuộc về Buyer hoặc Supplier.
+          </p>
+        </section>
+
         <!-- ── Thông tin đơn hàng ─────────────────────────────── -->
         <section class="order-detail-view__section">
           <h2 class="order-detail-view__section-title">Thông tin đơn hàng</h2>
@@ -330,16 +349,16 @@ function badgeClass(status, toneMap) {
           </dl>
         </section>
 
-        <!-- ── Nhà cung cấp ──────────────────────────────────── -->
-        <section v-if="isBuyer" class="order-detail-view__section">
+        <!-- ── Nhà cung cấp (BUYER + ADMIN) ────────────────────── -->
+        <section v-if="isBuyer || isAdmin" class="order-detail-view__section">
           <h2 class="order-detail-view__section-title">Nhà cung cấp</h2>
           <p class="order-detail-view__plain-text">
             {{ order.supplierCompanyName || '—' }}
           </p>
         </section>
 
-        <!-- ── Khách hàng (SUPPLIER only) ─────────────────────── -->
-        <section v-if="isSupplier" class="order-detail-view__section">
+        <!-- ── Khách hàng (SUPPLIER + ADMIN) ───────────────────── -->
+        <section v-if="isSupplier || isAdmin" class="order-detail-view__section">
           <h2 class="order-detail-view__section-title">Khách hàng</h2>
           <dl class="order-detail-view__dl">
             <div class="order-detail-view__dl-row">
@@ -687,6 +706,37 @@ function badgeClass(status, toneMap) {
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
+}
+
+/* ── Read-only notice (ADMIN) ────────────────────────── */
+.order-detail-view__readonly-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  background-color: var(--color-info-bg, #eff6ff);
+  color: var(--color-info, #1e40af);
+  border: 1px solid var(--color-info, #2563eb);
+  border-radius: var(--radius-lg);
+  padding: var(--space-3) var(--space-4);
+}
+
+.order-detail-view__readonly-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-full);
+  background-color: var(--color-info, #2563eb);
+  flex-shrink: 0;
+}
+
+.order-detail-view__readonly-text {
+  margin: 0;
+  font-size: var(--font-sm);
+  color: var(--color-info, #1e40af);
+}
+
+.order-detail-view__readonly-text strong {
+  font-weight: var(--weight-semibold);
 }
 
 .order-detail-view__back-nav {
