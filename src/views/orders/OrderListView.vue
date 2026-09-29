@@ -48,7 +48,9 @@ const isAdmin    = computed(() => role.value === 'ADMIN')
 onMounted(() => {
   if (!isBuyer.value && !isSupplier.value && !isAdmin.value) {
     router.replace('/403')
+    return
   }
+  load()
 })
 
 // ── Tabs ─────────────────────────────────────────────────────────────────

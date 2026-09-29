@@ -57,13 +57,11 @@ const categoriesLoading = ref(false)
 const productPriceMap = ref({}) // { [productId]: { from, to, count } }
 
 const statusOptions = [
-  { value: '', label: 'Tất cả trạng thái' },
   { value: 'ACTIVE', label: 'ACTIVE' },
   { value: 'INACTIVE', label: 'INACTIVE' },
 ]
 
 const categoryOptions = computed(() => [
-  { value: '', label: 'Tất cả danh mục' },
   ...categories.value.map((c) => ({ value: c.id, label: c.name })),
 ])
 
@@ -271,6 +269,7 @@ watch(role, () => {
         v-if="isAdmin"
         v-model="filters.status"
         label="Trạng thái"
+        placeholder="Tất cả trạng thái"
         :options="statusOptions"
         @update:modelValue="onFilterChange"
       />

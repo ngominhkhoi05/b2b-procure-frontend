@@ -78,24 +78,23 @@ export const PAYMENT_STATUS_TONE = {
  * @type {{value: string, label: string}[]}
  */
 export const ORDER_STATUS_OPTIONS = [
-  { value: '', label: 'Tất cả trạng thái' },
   { value: 'PENDING_CONFIRMATION', label: ORDER_STATUS_LABELS.PENDING_CONFIRMATION },
-  { value: 'PAID',                   label: ORDER_STATUS_LABELS.PAID },
-  { value: 'CONFIRMED',              label: ORDER_STATUS_LABELS.CONFIRMED },
-  { value: 'PREPARING',             label: ORDER_STATUS_LABELS.PREPARING },
-  { value: 'SHIPPING',              label: ORDER_STATUS_LABELS.SHIPPING },
-  { value: 'COMPLETED',             label: ORDER_STATUS_LABELS.COMPLETED },
-  { value: 'REJECTED',              label: ORDER_STATUS_LABELS.REJECTED },
+  { value: 'PAID',                 label: ORDER_STATUS_LABELS.PAID },
+  { value: 'CONFIRMED',            label: ORDER_STATUS_LABELS.CONFIRMED },
+  { value: 'PREPARING',            label: ORDER_STATUS_LABELS.PREPARING },
+  { value: 'SHIPPING',             label: ORDER_STATUS_LABELS.SHIPPING },
+  { value: 'COMPLETED',            label: ORDER_STATUS_LABELS.COMPLETED },
+  { value: 'REJECTED',             label: ORDER_STATUS_LABELS.REJECTED },
   { value: 'CANCELLED',            label: ORDER_STATUS_LABELS.CANCELLED },
 ]
 
 /**
- * Options array for a BaseSelect `options` prop — includes COD + ZaloPay
- * plus a leading "All" option. MOMO is excluded per Phase 7 spec.
+ * Options array for a BaseSelect `options` prop for COD + ZaloPay.
+ * The "Tất cả phương thức" placeholder is rendered by BaseSelect itself
+ * via the `placeholder` prop, so it must NOT be included here.
  * @type {{value: string, label: string}[]}
  */
 export const PAYMENT_METHOD_OPTIONS = [
-  { value: '', label: 'Tất cả phương thức' },
   { value: 'COD',     label: PAYMENT_METHOD_LABELS.COD },
   { value: 'ZALOPAY', label: PAYMENT_METHOD_LABELS.ZALOPAY },
 ]
