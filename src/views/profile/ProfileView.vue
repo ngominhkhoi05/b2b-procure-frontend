@@ -84,6 +84,11 @@ const profileForm = reactive({
   phone: '',
   avatarUrl: '',
   coverImageUrl: '',
+  // Track Cloudinary publicIds so the backend can delete the old asset
+  // when we replace an image. The component returns both URL + publicId
+  // from the upload endpoint; we send them back on profile save.
+  avatarPublicId: '',
+  coverImagePublicId: '',
 })
 const profileSaving = ref(false)
 const profileErrors = reactive({ general: '', fullName: '', phone: '', avatarUrl: '', coverImageUrl: '' })
@@ -98,6 +103,12 @@ async function loadUser() {
     profileForm.phone         = u.phone         ?? ''
     profileForm.avatarUrl     = u.avatarUrl     ?? ''
     profileForm.coverImageUrl = u.coverImageUrl ?? ''
+    // publicIds are intentionally NOT loaded here: backend keeps them
+    // internal (UserResponse does not expose them). The backend will
+    // look up the previous publicId from DB when deciding what to
+    // delete on the next save. See UserServiceImpl#replaceUserImage.
+    profileForm.avatarPublicId     = ''
+    profileForm.coverImagePublicId = ''
   } catch (err) {
     const { message } = handleApiError(err)
     userError.value = err
@@ -141,6 +152,10 @@ async function saveProfile() {
       phone:         profileForm.phone.trim()         || null,
       avatarUrl:     profileForm.avatarUrl.trim()     || null,
       coverImageUrl: profileForm.coverImageUrl.trim() || null,
+      // Send the new publicIds so the backend can replace (delete old
+      // + save new) atomically. Empty string is treated as "no change".
+      avatarPublicId:     profileForm.avatarPublicId.trim()     || null,
+      coverImagePublicId: profileForm.coverImagePublicId.trim() || null,
     }
     const updated = await updateCurrentUser(payload)
     user.value = updated
@@ -150,6 +165,12 @@ async function saveProfile() {
       fullName:  updated.fullName,
       avatarUrl: updated.avatarUrl,
     }
+    // publicIds were one-shot signals for this save. The backend has
+    // already done the destroy+swap. Clear them so a subsequent save
+    // without re-uploading is a no-op (would otherwise send the same
+    // publicId again and potentially confuse delete logic).
+    profileForm.avatarPublicId     = ''
+    profileForm.coverImagePublicId = ''
     toast.success('Cập nhật hồ sơ thành công')
   } catch (err) {
     const { message } = handleApiError(err)
@@ -339,13 +360,19 @@ async function saveCompany() {
 // doesn't dump its label/help/buttons into the layout. The parent owns
 // the file inputs, validation, and upload service calls.
 
-const MAX_IMAGE_BYTES = 5 * 1024 * 1024
-const AVATAR_ACCEPT   = 'image/jpeg,image/png,image/webp,image/gif'
-const heroFileInputs  = { cover: ref(null), avatar: ref(null) }
-const heroUploading   = reactive({ cover: false, avatar: false })
+const MAX_IMAGE_BYTES  = 5 * 1024 * 1024
+const AVATAR_ACCEPT    = 'image/jpeg,image/png,image/webp,image/gif'
+// Vue 3 does NOT support `ref="heroFileInputs.cover"` style binding for
+// assigning into a nested object property — that syntax creates a new
+// local ref `heroFileInputs.cover` instead, so `?.click()` finds null.
+// Use two separate refs and look them up by `which`.
+const coverFileInput   = ref(null)
+const avatarFileInput  = ref(null)
+const heroUploading    = reactive({ cover: false, avatar: false })
 
 function pickHeroFile(which) {
-  heroFileInputs[which]?.value?.click()
+  const input = which === 'cover' ? coverFileInput.value : avatarFileInput.value
+  input?.click()
 }
 
 async function onHeroFileChange(which, event) {
@@ -365,12 +392,15 @@ async function onHeroFileChange(which, event) {
 
   const uploadFn  = which === 'cover' ? uploadCover : uploadAvatar
   const fieldKey  = which === 'cover' ? 'coverImageUrl' : 'avatarUrl'
+  const publicIdKey = which === 'cover' ? 'coverImagePublicId' : 'avatarPublicId'
   heroUploading[which] = true
   try {
     const result  = await uploadFn(file)
-    const newUrl  = typeof result === 'string' ? result : result?.url
+    const newUrl      = typeof result === 'string' ? result : result?.url
+    const newPublicId = typeof result === 'string' ? '' : (result?.publicId ?? '')
     if (!newUrl) throw new Error('Upload service returned no URL')
-    profileForm[fieldKey] = newUrl
+    profileForm[fieldKey]    = newUrl
+    profileForm[publicIdKey] = newPublicId
     toast.success(which === 'cover' ? 'Đã cập nhật ảnh bìa' : 'Đã cập nhật ảnh đại diện')
   } catch (err) {
     const { message } = handleApiError(err)
@@ -381,9 +411,12 @@ async function onHeroFileChange(which, event) {
 }
 
 function clearHeroImage(which) {
-  const fieldKey = which === 'cover' ? 'coverImageUrl' : 'avatarUrl'
-  profileForm[fieldKey] = ''
-  if (heroFileInputs[which]?.value) heroFileInputs[which].value.value = ''
+  const fieldKey    = which === 'cover' ? 'coverImageUrl'     : 'avatarUrl'
+  const publicIdKey = which === 'cover' ? 'coverImagePublicId' : 'avatarPublicId'
+  profileForm[fieldKey]    = ''
+  profileForm[publicIdKey] = ''
+  const input = which === 'cover' ? coverFileInput.value : avatarFileInput.value
+  if (input) input.value = ''
 }
 
 onMounted(() => {
@@ -417,7 +450,7 @@ onMounted(() => {
           {{ heroUploading.cover ? 'Đang tải...' : (profileForm.coverImageUrl ? 'Đổi ảnh bìa' : 'Tải ảnh bìa') }}
         </button>
         <input
-          ref="heroFileInputs.cover"
+          ref="coverFileInput"
           type="file"
           accept="image/jpeg,image/png,image/webp,image/gif"
           class="profile-view__hero-file-input"
@@ -459,7 +492,7 @@ onMounted(() => {
           </div>
           <p class="profile-view__hero-avatar-help">PNG, JPG, WEBP hoặc GIF. Tối đa 5 MB.</p>
           <input
-            ref="heroFileInputs.avatar"
+            ref="avatarFileInput"
             type="file"
             accept="image/jpeg,image/png,image/webp,image/gif"
             class="profile-view__hero-file-input"
