@@ -8,9 +8,13 @@
  *
  * Every section handles loading / empty / error states individually
  * so one failure doesn't blank the whole page.
+ *
+ * Phase 10 refinement: a `fromDate` / `toDate` filter drives the
+ * statistics call. Backend semantics: fromDate inclusive, toDate exclusive.
+ * Do not auto-increment the toDate — the backend handles the boundary.
  */
 
-import { ref, onMounted } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
 import { getStatisticsOverview } from '@/services/adminService'
 import { listOrders } from '@/services/orderService'
 import { formatCurrency, formatDate, formatNumber } from '@/utils/format'
@@ -28,11 +32,16 @@ const recentOrders = ref([])
 const ordersLoading = ref(false)
 const ordersError = ref(null)
 
+const dateFilters = reactive({ fromDate: '', toDate: '' })
+
 async function loadStats() {
   statsLoading.value = true
   statsError.value = null
   try {
-    const data = await getStatisticsOverview()
+    const params = {}
+    if (dateFilters.fromDate) params.fromDate = dateFilters.fromDate
+    if (dateFilters.toDate)   params.toDate   = dateFilters.toDate
+    const data = await getStatisticsOverview(params)
     stats.value = data
     updateRangeLabel(data)
   } catch (err) {
@@ -41,6 +50,16 @@ async function loadStats() {
   } finally {
     statsLoading.value = false
   }
+}
+
+function applyDateFilter() {
+  loadStats()
+}
+
+function clearDateFilter() {
+  dateFilters.fromDate = ''
+  dateFilters.toDate = ''
+  loadStats()
 }
 
 async function loadRecentOrders() {
@@ -95,6 +114,52 @@ const ICON_BLOCK   = 'M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52
 
 <template>
   <div class="admin-dashboard">
+    <!-- Date filter (Phase 10) -->
+    <section class="admin-dashboard__filter-card">
+      <div class="admin-dashboard__filter-row">
+        <div class="admin-dashboard__filter-field">
+          <label for="admin-stats-from">Từ ngày</label>
+          <input
+            id="admin-stats-from"
+            v-model="dateFilters.fromDate"
+            type="date"
+            class="admin-dashboard__filter-input"
+          />
+        </div>
+        <div class="admin-dashboard__filter-field">
+          <label for="admin-stats-to">Đến ngày</label>
+          <input
+            id="admin-stats-to"
+            v-model="dateFilters.toDate"
+            type="date"
+            class="admin-dashboard__filter-input"
+          />
+        </div>
+        <div class="admin-dashboard__filter-actions">
+          <button
+            type="button"
+            class="admin-dashboard__filter-btn admin-dashboard__filter-btn--primary"
+            :disabled="statsLoading"
+            @click="applyDateFilter"
+          >
+            Áp dụng
+          </button>
+          <button
+            type="button"
+            class="admin-dashboard__filter-btn admin-dashboard__filter-btn--ghost"
+            :disabled="statsLoading"
+            @click="clearDateFilter"
+          >
+            Đặt lại
+          </button>
+        </div>
+      </div>
+      <p class="admin-dashboard__filter-hint">
+        Khoảng thống kê: từ ngày (bao gồm) đến trước ngày kết thúc (không bao gồm).
+        Để trống để xem toàn bộ dữ liệu.
+      </p>
+    </section>
+
     <!-- KPI grid -->
     <DashboardSection title="Tổng quan hệ thống" subtitle="Số liệu thống kê từ backend">
       <template v-if="statsRangeLabel" #actions>
@@ -202,5 +267,110 @@ const ICON_BLOCK   = 'M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52
   font-weight: var(--weight-medium);
   color: var(--color-text-secondary);
   white-space: nowrap;
+}
+
+.admin-dashboard__filter-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4) var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.admin-dashboard__filter-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: var(--space-3);
+  align-items: end;
+}
+
+.admin-dashboard__filter-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.admin-dashboard__filter-field label {
+  font-size: var(--font-sm);
+  font-weight: var(--weight-medium);
+  color: var(--color-text-secondary);
+}
+
+.admin-dashboard__filter-input {
+  height: 38px;
+  padding: 0 var(--space-3);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  color: var(--color-text-primary);
+  font-size: var(--font-base);
+  outline: none;
+  transition:
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+.admin-dashboard__filter-input:focus {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+.admin-dashboard__filter-actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.admin-dashboard__filter-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+  padding: 0 var(--space-4);
+  border-radius: var(--radius-md);
+  font-size: var(--font-sm);
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: background-color var(--transition-fast);
+}
+
+.admin-dashboard__filter-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.admin-dashboard__filter-btn--primary {
+  background-color: var(--color-primary);
+  color: var(--color-text-inverse);
+}
+
+.admin-dashboard__filter-btn--primary:hover:not(:disabled) {
+  background-color: var(--color-primary-hover);
+}
+
+.admin-dashboard__filter-btn--ghost {
+  background-color: var(--color-surface);
+  color: var(--color-text-secondary);
+  border-color: var(--color-border-strong);
+}
+
+.admin-dashboard__filter-btn--ghost:hover:not(:disabled) {
+  background-color: var(--color-surface-alt);
+  color: var(--color-text-primary);
+}
+
+.admin-dashboard__filter-hint {
+  margin: 0;
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+}
+
+@media (max-width: 640px) {
+  .admin-dashboard__filter-row {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

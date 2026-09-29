@@ -47,14 +47,13 @@ function iconPath(name) {
 const NAV_BY_ROLE = {
   ADMIN: [
     { to: '/dashboard', label: 'Bảng điều khiển', icon: 'dashboard' },
-    { to: '/users',     label: 'Người dùng',      icon: 'users',     placeholder: true },
-    { to: '/companies', label: 'Công ty',          icon: 'building',  placeholder: true },
+    { to: '/users',     label: 'Người dùng',      icon: 'users' },
+    { to: '/companies', label: 'Công ty',          icon: 'building' },
     { to: '/products',  label: 'Sản phẩm',        icon: 'package' },
     { to: '/categories',label: 'Danh mục',        icon: 'folder' },
-    { to: '/orders',    label: 'Đơn hàng',        icon: 'receipt',   placeholder: true },
-    { to: '/commission',label: 'Hoa hồng',        icon: 'wallet',    placeholder: true },
-    { to: '/statistics',label: 'Thống kê',        icon: 'chart',     placeholder: true },
-    { to: '/settings',  label: 'Cài đặt',         icon: 'cog',       placeholder: true },
+    { to: '/orders',    label: 'Đơn hàng',        icon: 'receipt' },
+    { to: '/commission',label: 'Hoa hồng',        icon: 'wallet' },
+    { to: '/settings',  label: 'Cài đặt',         icon: 'cog' },
     { to: '/profile',   label: 'Hồ sơ',           icon: 'user' },
   ],
   SUPPLIER: [

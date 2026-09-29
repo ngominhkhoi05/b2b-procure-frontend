@@ -1,12 +1,11 @@
 /**
- * Vue Router — Phase 3 Application Shell & Role Dashboards.
+ * Vue Router — Phase 10 Admin Management + Profile / Account.
  *
  * Routes:
  *   Public:           /, /about, /login, /register, /oauth2/redirect, /403, /404
  *   Authenticated:    /dashboard (role router), /profile
- *   Placeholder:      /products, /cart, /orders, /users, /companies,
- *                     /categories, /commission, /statistics, /settings
- *                     → all point to the ProfileView (intentionally incomplete).
+ *                     /products, /cart, /orders, /categories
+ *                     /users, /companies, /commission, /settings
  *
  * Guard behaviour:
  *   - Unauthenticated → /login?redirect=<target>
@@ -44,6 +43,12 @@ const CheckoutResultView = () => import('@/views/checkout/CheckoutResultView.vue
 // ── Phase 7 — Buyer Order views ──────────────────────────────────────────
 const OrderListView   = () => import('@/views/orders/OrderListView.vue')
 const OrderDetailView = () => import('@/views/orders/OrderDetailView.vue')
+
+// ── Phase 10 — Admin management views ──────────────────────────────────
+const UserListView      = () => import('@/views/users/UserListView.vue')
+const CompanyListView   = () => import('@/views/companies/CompanyListView.vue')
+const CommissionListView = () => import('@/views/commission/CommissionListView.vue')
+const SettingsListView  = () => import('@/views/settings/SettingsListView.vue')
 
 // ── Route definitions ─────────────────────────────────────────────────────────
 
@@ -244,7 +249,7 @@ const routes = [
   {
     path: '/users',
     name: 'users',
-    component: ProfileView,
+    component: UserListView,
     meta: {
       requiresAuth: true,
       roles: ['ADMIN'],
@@ -254,7 +259,7 @@ const routes = [
   {
     path: '/companies',
     name: 'companies',
-    component: ProfileView,
+    component: CompanyListView,
     meta: {
       requiresAuth: true,
       roles: ['ADMIN'],
@@ -264,7 +269,7 @@ const routes = [
   {
     path: '/commission',
     name: 'commission',
-    component: ProfileView,
+    component: CommissionListView,
     meta: {
       requiresAuth: true,
       roles: ['ADMIN'],
@@ -284,7 +289,7 @@ const routes = [
   {
     path: '/settings',
     name: 'settings',
-    component: ProfileView,
+    component: SettingsListView,
     meta: {
       requiresAuth: true,
       roles: ['ADMIN'],
