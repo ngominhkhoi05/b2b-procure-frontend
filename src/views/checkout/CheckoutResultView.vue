@@ -50,6 +50,9 @@ const retrying = ref(false)
 const paymentStatus = computed(
   () => orderDetail.value?.payment?.paymentStatus ?? session.value?.paymentStatus ?? null
 )
+const orderId = computed(
+  () => orderDetail.value?.id ?? session.value?.orderId ?? null
+)
 const orderStatus = computed(
   () => orderDetail.value?.status ?? session.value?.orderStatus ?? null
 )
@@ -214,9 +217,10 @@ function openStoredPaymentUrl() {
   }
 }
 
-function showOrderDetail() {
-  // Phase 7 will implement this; we keep the button as a disabled stub
-  // so the buyer knows it's on the roadmap.
+function goToOrderDetail() {
+  const id = orderId.value
+  if (!id) return
+  router.push({ name: 'order-detail', params: { id } })
 }
 </script>
 
@@ -327,14 +331,14 @@ function showOrderDetail() {
           Làm mới trạng thái
         </BaseButton>
 
-        <!-- Always: track order (Phase 7 stub) + back to cart + back to products -->
+        <!-- Always: track order + back to cart + back to products -->
         <BaseButton
           variant="secondary"
-          disabled
-          title="Theo dõi đơn hàng sẽ có trong giai đoạn tiếp theo"
-          @click="showOrderDetail"
+          :disabled="!orderId"
+          :title="orderId ? 'Mở trang chi tiết đơn hàng' : 'Đang tải đơn hàng...'"
+          @click="goToOrderDetail"
         >
-          Theo dõi đơn hàng (sắp có)
+          Theo dõi đơn hàng
         </BaseButton>
 
         <BaseButton
