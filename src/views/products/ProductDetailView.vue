@@ -227,6 +227,7 @@ const addToCartDisabled = computed(() => {
             <AddToCartWidget
               :available-quantity="product.availableQuantity ?? null"
               :disabled="addToCartDisabled"
+              :loading="addingToCart"
               @add="onAddToCart"
             />
           </div>
