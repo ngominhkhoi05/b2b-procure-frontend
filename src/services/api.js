@@ -29,8 +29,12 @@ const api = axios.create({
     Accept: 'application/json',
   },
 
-  // 15-second timeout keeps the UX from hanging indefinitely on a dead backend.
-  timeout: 15_000,
+  // 60-second timeout accommodates:
+  //   • Backend cold start (Spring Boot may take 30s on first request after boot).
+  //   • BUYER flow: GET /products + 12 parallel GET /products/{id}/prices in worst case.
+  //   • Large pages on a 1M-row products table.
+  // Override per-request for tighter SLA endpoints.
+  timeout: 60_000,
 })
 
 // ── Request interceptor ────────────────────────────────────────────────────────
