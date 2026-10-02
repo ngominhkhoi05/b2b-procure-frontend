@@ -142,12 +142,16 @@ const addToCartDisabled = computed(() => {
 
     <!-- Content -->
     <article v-else class="product-detail-view__content">
-      <!-- Breadcrumb / back -->
-      <nav class="product-detail-view__breadcrumb" aria-label="breadcrumb">
-        <RouterLink to="/products" class="product-detail-view__back">
-          ← Quay lại danh sách
-        </RouterLink>
-      </nav>
+      <header class="product-detail-view__header">
+        <BaseButton
+          variant="ghost"
+          class="product-detail-view__back"
+          @click="router.push({ name: 'products' })"
+        >
+          <span class="product-detail-view__back-icon" aria-hidden="true">←</span>
+          Quay lại danh sách
+        </BaseButton>
+      </header>
 
       <!-- Hero -->
       <section class="product-detail-view__hero">
@@ -223,6 +227,7 @@ const addToCartDisabled = computed(() => {
             <AddToCartWidget
               :available-quantity="product.availableQuantity ?? null"
               :disabled="addToCartDisabled"
+              :loading="addingToCart"
               @add="onAddToCart"
             />
           </div>
@@ -286,7 +291,6 @@ const addToCartDisabled = computed(() => {
   gap: var(--space-5);
   max-width: var(--container-2xl);
   margin: 0 auto;
-  width: 100%;
 }
 
 .product-detail-view__state {
@@ -296,18 +300,20 @@ const addToCartDisabled = computed(() => {
   min-height: 200px;
 }
 
-.product-detail-view__breadcrumb {
-  font-size: var(--font-sm);
+.product-detail-view__header {
+  margin-bottom: var(--space-3);
 }
 
 .product-detail-view__back {
-  color: var(--color-primary);
-  text-decoration: none;
+  padding: 0;
   font-weight: var(--weight-medium);
 }
 
-.product-detail-view__back:hover {
-  text-decoration: underline;
+.product-detail-view__back-icon {
+  display: inline-flex;
+  margin-right: var(--space-2);
+  font-size: var(--font-md);
+  line-height: 1;
 }
 
 .product-detail-view__hero {

@@ -32,6 +32,13 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  // True only while a submit is in-flight. When true the button shows a spinner;
+  // when false (even if disabled), the button is static so out-of-stock products
+  // don't render a permanently spinning button.
+  loading: {
+    type: Boolean,
+    default: false,
+  },
 })
 
 const emit = defineEmits(['add'])
@@ -51,7 +58,7 @@ const error = computed(() => {
   return ''
 })
 
-const canAdd = computed(() => !error.value && !props.disabled)
+const canAdd = computed(() => !error.value && !props.disabled && !props.loading)
 
 function onQuantityChange(value) {
   quantity.value = value
@@ -96,7 +103,7 @@ watch(
       variant="primary"
       block
       :disabled="!canAdd"
-      :loading="disabled"
+      :loading="loading"
       @click="onAdd"
     >
       Thêm vào giỏ hàng

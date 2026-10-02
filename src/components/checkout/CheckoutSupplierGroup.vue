@@ -3,16 +3,19 @@
  * CheckoutSupplierGroup — read-only list of the items the buyer is
  * about to check out (single supplier, all items pre-validated).
  *
+ * Layout: each row is a single compact horizontal line —
+ *   thumb → name + SKU → unit price → quantity → subtotal (highlighted)
+ *
  * Props:
  *   supplierName — string
  *   items        — CheckoutSelectionItem[]
  *
  * Emits: none (read-only).
  *
- * Reuses the thumbnail + warning pattern from CartItem for visual
- * consistency but hides the row controls (quantity, remove, checkbox).
+ * Read-only by design: quantity, remove, and selection controls are
+ * not exposed here. If items drift (price, stock, supplier) the page
+ * bounces the user back to /cart.
  */
-import { computed } from 'vue'
 import { formatCurrency, formatNumber } from '@/utils/format'
 
 defineProps({
@@ -52,6 +55,7 @@ function onImgError(e) {
         :key="item.cartItemId"
         class="checkout-line"
       >
+        <!-- Thumbnail -->
         <div class="checkout-line__thumb">
           <img
             v-if="item.productImageUrl"
@@ -64,30 +68,35 @@ function onImgError(e) {
           </svg>
         </div>
 
-        <div class="checkout-line__main">
-          <div class="checkout-line__heading">
-            <h3 class="checkout-line__name" :title="item.productName">
-              {{ item.productName }}
-            </h3>
-            <span class="checkout-line__sku">SKU: {{ item.sku }}</span>
-          </div>
-
-          <div class="checkout-line__price-row">
-            <span class="checkout-line__label">Đơn giá</span>
-            <span v-if="hasUnitPrice(item)" class="checkout-line__price">
-              {{ formatCurrency(item.unitPrice) }}
-            </span>
-            <span v-else class="checkout-line__price checkout-line__price--missing">—</span>
-          </div>
-
-          <div class="checkout-line__qty-row">
-            <span class="checkout-line__label">Số lượng</span>
-            <span class="checkout-line__qty">{{ formatNumber(item.quantity) }}</span>
-          </div>
+        <!-- Name + SKU -->
+        <div class="checkout-line__heading">
+          <h3 class="checkout-line__name" :title="item.productName">
+            {{ item.productName }}
+          </h3>
+          <span class="checkout-line__sku">SKU: {{ item.sku }}</span>
         </div>
 
-        <div class="checkout-line__side">
-          <span class="checkout-line__label">Thành tiền</span>
+        <!-- Unit price -->
+        <div class="checkout-line__price-col">
+          <span class="checkout-line__caption">Đơn giá</span>
+          <span v-if="hasUnitPrice(item)" class="checkout-line__price">
+            {{ formatCurrency(item.unitPrice) }}
+          </span>
+          <span v-else class="checkout-line__price checkout-line__price--missing">—</span>
+        </div>
+
+        <!-- Quantity (read-only text) -->
+        <div class="checkout-line__qty-col">
+          <span class="checkout-line__caption">Số lượng</span>
+          <span class="checkout-line__qty">
+            <span class="checkout-line__qty-label">SL:</span>
+            <span class="checkout-line__qty-value">{{ formatNumber(item.quantity) }}</span>
+          </span>
+        </div>
+
+        <!-- Subtotal (highlighted, right-aligned) -->
+        <div class="checkout-line__subtotal-col">
+          <span class="checkout-line__caption">Thành tiền</span>
           <span
             v-if="hasUnitPrice(item)"
             class="checkout-line__subtotal"
@@ -165,17 +174,18 @@ function onImgError(e) {
 
 .checkout-line {
   display: grid;
-  grid-template-columns: 100px minmax(0, 1fr) 180px;
+  grid-template-columns: 72px minmax(0, 1.4fr) 110px auto 120px;
   gap: var(--space-4);
-  padding: var(--space-4);
+  align-items: center;
+  padding: var(--space-3) var(--space-4);
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
 }
 
 .checkout-line__thumb {
-  width: 100px;
-  height: 100px;
+  width: 72px;
+  height: 72px;
   border-radius: var(--radius-md);
   background-color: var(--color-surface-alt);
   overflow: hidden;
@@ -183,6 +193,7 @@ function onImgError(e) {
   align-items: center;
   justify-content: center;
   color: var(--color-text-muted);
+  flex-shrink: 0;
 }
 
 .checkout-line__thumb img {
@@ -200,56 +211,67 @@ function onImgError(e) {
 }
 
 .checkout-line__thumb svg {
-  width: 40px;
-  height: 40px;
+  width: 32px;
+  height: 32px;
   opacity: 0.6;
 }
 
-.checkout-line__main {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-  min-width: 0;
-}
-
+/* ── Name + SKU (single-line ellipsis) ────────────────────────────── */
 .checkout-line__heading {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  min-width: 0;
 }
 
 .checkout-line__name {
   margin: 0;
-  font-size: var(--font-base);
+  font-size: var(--font-md);
   font-weight: var(--weight-semibold);
   color: var(--color-text-primary);
   line-height: var(--leading-snug);
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
 }
 
 .checkout-line__sku {
   font-size: var(--font-xs);
   color: var(--color-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.checkout-line__price-row,
-.checkout-line__qty-row {
+/* ── Caption + value columns ─────────────────────────────────────────── */
+.checkout-line__price-col,
+.checkout-line__qty-col,
+.checkout-line__subtotal-col {
   display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  flex-wrap: wrap;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
 }
 
-.checkout-line__label {
+.checkout-line__price-col {
+  align-items: flex-start;
+}
+
+.checkout-line__qty-col {
+  align-items: flex-start;
+}
+
+.checkout-line__subtotal-col {
+  align-items: flex-end;
+  text-align: right;
+}
+
+.checkout-line__caption {
   font-size: var(--font-xs);
   color: var(--color-text-muted);
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  min-width: 70px;
+  line-height: 1;
 }
 
 .checkout-line__price {
@@ -257,84 +279,117 @@ function onImgError(e) {
   font-weight: var(--weight-medium);
   color: var(--color-text-primary);
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .checkout-line__price--missing {
   color: var(--color-text-muted);
 }
 
+/* ── Quantity (read-only chip) ─────────────────────────────────────── */
 .checkout-line__qty {
-  font-size: var(--font-base);
-  font-weight: var(--weight-medium);
-  color: var(--color-text-primary);
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-1);
+  white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
 
-.checkout-line__side {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  justify-content: center;
-  gap: 2px;
+.checkout-line__qty-label {
+  font-size: var(--font-xs);
+  font-weight: var(--weight-medium);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
+.checkout-line__qty-value {
+  font-size: var(--font-base);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-primary);
+}
+
+/* ── Subtotal (highlighted) ────────────────────────────────────────── */
 .checkout-line__subtotal {
   font-size: var(--font-lg);
   font-weight: var(--weight-semibold);
-  color: var(--color-text-primary);
+  color: var(--color-primary);
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .checkout-line__subtotal--missing {
   color: var(--color-text-muted);
 }
 
-@media (max-width: 720px) {
+/* ── Responsive ────────────────────────────────────────────────────── */
+@media (max-width: 900px) {
   .checkout-line {
-    grid-template-columns: 80px minmax(0, 1fr);
+    grid-template-columns: 64px minmax(0, 1fr) auto 32px;
     grid-template-rows: auto auto;
+    column-gap: var(--space-3);
+    row-gap: var(--space-2);
   }
 
   .checkout-line__thumb {
-    width: 80px;
-    height: 80px;
     grid-column: 1;
     grid-row: 1;
+    width: 64px;
+    height: 64px;
   }
 
-  .checkout-line__main {
-    grid-column: 2;
+  .checkout-line__heading {
+    grid-column: 2 / span 2;
     grid-row: 1;
   }
 
-  .checkout-line__side {
-    grid-column: 1 / span 2;
+  .checkout-line__price-col {
+    grid-column: 1;
     grid-row: 2;
     flex-direction: row;
-    align-items: center;
-    justify-content: space-between;
-    border-top: 1px solid var(--color-border);
-    padding-top: var(--space-3);
-    width: 100%;
+    align-items: baseline;
+    gap: var(--space-2);
+  }
+
+  .checkout-line__qty-col {
+    grid-column: 2;
+    grid-row: 2;
+  }
+
+  .checkout-line__subtotal-col {
+    grid-column: 3;
+    grid-row: 2;
+    flex-direction: row;
+    align-items: baseline;
+    gap: var(--space-2);
   }
 }
 
-@media (max-width: 480px) {
+@media (max-width: 560px) {
   .checkout-line {
     grid-template-columns: 1fr;
+    grid-template-rows: auto;
   }
 
-  .checkout-line__thumb,
-  .checkout-line__main,
-  .checkout-line__side {
+  .checkout-line__thumb {
+    display: none;
+  }
+
+  .checkout-line__heading,
+  .checkout-line__price-col,
+  .checkout-line__qty-col,
+  .checkout-line__subtotal-col {
     grid-column: 1;
     grid-row: auto;
+    flex-direction: row;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--space-2);
   }
 
-  .checkout-line__side {
-    flex-direction: row;
-    align-items: center;
-    justify-content: space-between;
+  .checkout-line__subtotal-col {
+    border-top: 1px solid var(--color-border);
+    padding-top: var(--space-2);
   }
 }
 </style>

@@ -14,9 +14,9 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
-  ORDER_STATUS_TONE,
-  PAYMENT_STATUS_TONE,
   canCancelOrder,
+  getOrderStatusLabel,
+  getOrderStatusTone,
   isRefundRelevant,
   getPaymentMethodLabel,
   getPaymentStatusLabel,
@@ -35,6 +35,7 @@ import {
   completeSupplierOrder,
   getAdminOrderById,
 } from '@/services/orderService'
+import { retryOrderZaloPay } from '@/services/paymentService'
 import { useAuthStore } from '@/stores/auth'
 import { useToastStore } from '@/stores/toast'
 import { handleApiError } from '@/utils/errorHandler'
@@ -68,6 +69,7 @@ const rejectReason     = ref('')
 const rejectSubmitting = ref(false)
 
 const actionSubmitting = ref('')
+const repaying         = ref(false)
 
 // ── Role guard ────────────────────────────────────────────────────────────────
 
@@ -155,6 +157,15 @@ const refundMessage = computed(() => {
   }
   return ''
 })
+
+// True only when the buyer is allowed to retry the ZaloPay payment.
+// Conditions: authenticated as buyer, ZaloPay method, payment status PENDING.
+const canRepayZaloPay = computed(
+  () =>
+    isBuyer.value &&
+    order.value?.payment?.paymentMethod === 'ZALOPAY' &&
+    order.value?.payment?.paymentStatus === 'PENDING'
+)
 
 // ── Cancel ────────────────────────────────────────────────────────────────────
 
@@ -252,608 +263,786 @@ const rejectDisabled = computed(
 
 function onImgError(e) {
   e.target.style.display = 'none'
-  e.target.closest('.order-detail-view__item-img-wrap')?.classList.add('order-detail-view__item-img-wrap--hidden')
+  e.target.closest('.item__img-wrap')?.classList.add('item__img-wrap--hidden')
 }
 
-// ── Status badge class ────────────────────────────────────────────────────────
+// ── Navigation: product link ──────────────────────────────────────────────────
 
-function badgeClass(status, toneMap) {
-  const tone = toneMap[status] ?? 'neutral'
-  return `badge badge--${tone}`
+function goToProduct(productId) {
+  if (productId == null) return
+  router.push({ name: 'product-detail', params: { id: productId } })
+}
+
+// ── ZaloPay: re-pay from Order Detail ─────────────────────────────────────────
+
+async function retryZaloPay() {
+  if (!order.value?.id || repaying.value) return
+  repaying.value = true
+  try {
+    const zp = await retryOrderZaloPay(order.value.id)
+    if (!zp?.paymentUrl) {
+      throw new Error('ZaloPay did not return a payment URL')
+    }
+    // Mirror CheckoutResultView's behaviour: open ZaloPay in a new tab so
+    // this Order Detail page stays mounted and the buyer can monitor / refresh
+    // payment status by pressing the existing "Làm mới trạng thái" button on
+    // the Checkout Result page they were sent to earlier — or, if the popup
+    // is blocked, fall back to a toast prompting them to re-try.
+    const newTab = window.open(zp.paymentUrl, '_blank', 'noopener,noreferrer')
+    if (!newTab) {
+      toast.error(
+        'Trình duyệt đã chặn cửa sổ thanh toán. Vui lòng cho phép popup cho trang này rồi thử lại.'
+      )
+    }
+  } catch (err) {
+    const { message } = handleApiError(err)
+    toast.error(message || 'Không thể khởi tạo lại thanh toán ZaloPay')
+  } finally {
+    repaying.value = false
+  }
 }
 </script>
 
 <template>
   <div class="order-detail-view">
-    <div class="order-detail-view__container">
 
-      <!-- Loading -->
-      <div v-if="loading" class="order-detail-view__state">
-        <BaseLoading label="Đang tải chi tiết đơn hàng..." />
-      </div>
+    <!-- ── Loading ───────────────────────────────────────────── -->
+    <div v-if="loading" class="order-detail-view__state">
+      <BaseLoading label="Đang tải chi tiết đơn hàng..." />
+    </div>
 
-      <!-- Error / not found -->
-      <div v-else-if="error" class="order-detail-view__state">
-        <BaseError
-          title="Không tìm thấy đơn hàng hoặc bạn không có quyền truy cập"
-          :error="error"
-        >
-          <template #actions>
-            <BaseButton variant="ghost" @click="router.push({ name: 'orders' })">
-              ← Quay lại danh sách
-            </BaseButton>
-          </template>
-        </BaseError>
-      </div>
+    <!-- ── Error / not found ────────────────────────────────── -->
+    <div v-else-if="error" class="order-detail-view__state">
+      <BaseError
+        title="Không tìm thấy đơn hàng hoặc bạn không có quyền truy cập"
+        :error="error"
+      >
+        <template #actions>
+          <BaseButton variant="ghost" @click="router.push({ name: 'orders' })">
+            ← Quay lại danh sách
+          </BaseButton>
+        </template>
+      </BaseError>
+    </div>
 
-      <!-- Order content -->
-      <template v-else-if="order">
+    <!-- ── Content ──────────────────────────────────────────── -->
+    <template v-else-if="order">
 
-        <!-- ── Header card ─────────────────────────────────────── -->
-        <header class="order-detail-view__header-card">
-          <nav class="order-detail-view__back-nav">
-            <button
-              type="button"
-              class="order-detail-view__back-btn"
-              @click="router.push({ name: 'orders' })"
+      <!-- ── Page header ───────────────────────────────────── -->
+      <header class="order-detail-view__header">
+        <div class="order-detail-view__header-top">
+          <button
+            type="button"
+            class="order-detail-view__back-btn"
+            @click="router.push({ name: 'orders' })"
+          >
+            <span class="order-detail-view__back-arrow" aria-hidden="true">←</span>
+            <span>Quay lại danh sách</span>
+          </button>
+        </div>
+
+        <div class="order-detail-view__header-main">
+          <div class="order-detail-view__header-left">
+            <h1 class="order-detail-view__title">
+              Đơn hàng <span class="order-detail-view__order-code">{{ order.orderCode }}</span>
+            </h1>
+            <p class="order-detail-view__subtitle">
+              Tạo lúc {{ order.createdAt ? formatDateTime(order.createdAt) : '—' }}
+              <template v-if="order.updatedAt && order.updatedAt !== order.createdAt">
+                · Cập nhật {{ formatDateTime(order.updatedAt) }}
+              </template>
+            </p>
+          </div>
+          <div class="order-detail-view__header-right">
+            <span
+              class="order-detail-view__status-pill order-detail-view__status-pill--{{ getOrderStatusTone(order.status) }}"
             >
-              ← Quay lại danh sách
-            </button>
-          </nav>
+              {{ getOrderStatusLabel(order.status) }}
+            </span>
+            <BaseButton
+              v-if="isBuyer && canCancel"
+              variant="danger"
+              @click="openCancelModal"
+            >
+              Hủy đơn hàng
+            </BaseButton>
+          </div>
+        </div>
+      </header>
 
-          <div class="order-detail-view__header-main">
-            <div class="order-detail-view__header-left">
-              <span class="order-detail-view__order-code">{{ order.orderCode }}</span>
-              <span :class="badgeClass(order.status, ORDER_STATUS_TONE)">
-                {{ order.status }}
+      <!-- ── Admin read-only notice ────────────────────────── -->
+      <div v-if="isAdmin" class="order-detail-view__notice" role="status">
+        <span class="order-detail-view__notice-icon" aria-hidden="true">i</span>
+        <p class="order-detail-view__notice-text">
+          <strong>Chế độ xem.</strong>
+          Admin chỉ có quyền truy cập đọc. Mọi thao tác thay đổi trạng thái đơn hàng
+          thuộc về Buyer hoặc Supplier.
+        </p>
+      </div>
+
+      <!-- ── Body grid ─────────────────────────────────────── -->
+      <div class="order-detail-view__grid">
+
+        <!-- ── Main column ─────────────────────────────────── -->
+        <div class="order-detail-view__main">
+
+          <!-- ── Thông tin giao hàng ───────────────────── -->
+          <section class="card">
+            <h2 class="card__title">Thông tin giao hàng</h2>
+            <div class="info-grid info-grid--2">
+              <div class="info-row">
+                <dt class="info-row__label">Người nhận</dt>
+                <dd class="info-row__value">{{ order.shippingCompanyName || '—' }}</dd>
+              </div>
+              <div class="info-row">
+                <dt class="info-row__label">Số điện thoại</dt>
+                <dd class="info-row__value">{{ order.shippingPhone || '—' }}</dd>
+              </div>
+              <div class="info-row info-row--full">
+                <dt class="info-row__label">Địa chỉ giao hàng</dt>
+                <dd class="info-row__value">{{ order.shippingAddress || '—' }}</dd>
+              </div>
+            </div>
+          </section>
+
+          <!-- ── Sản phẩm ────────────────────────────────── -->
+          <section class="card">
+            <div class="card__header">
+              <h2 class="card__title">Sản phẩm</h2>
+              <span class="card__hint">
+                {{ order.items?.length ?? 0 }} sản phẩm
               </span>
             </div>
-            <div class="order-detail-view__header-right">
-              <BaseButton
-                v-if="isBuyer && canCancel"
-                variant="danger"
-                @click="openCancelModal"
+
+            <ul class="item-list">
+              <li
+                v-for="item in order.items"
+                :key="item.id"
+                class="item item--link"
+                role="button"
+                tabindex="0"
+                :aria-label="`Xem chi tiết sản phẩm ${item.productName}`"
+                @click="goToProduct(item.productId)"
+                @keydown.enter.prevent="goToProduct(item.productId)"
+                @keydown.space.prevent="goToProduct(item.productId)"
               >
-                Hủy đơn hàng
+                <div class="item__media">
+                  <div class="item__img-wrap">
+                    <img
+                      v-if="item.productImageUrl"
+                      :src="item.productImageUrl"
+                      :alt="item.productName"
+                      class="item__img"
+                      @error="onImgError"
+                    />
+                  </div>
+                </div>
+
+                <div class="item__body">
+                  <p class="item__name">{{ item.productName }}</p>
+                  <p class="item__meta">
+                    {{ formatCurrency(item.unitPrice) }}
+                    <span class="item__sep" aria-hidden="true">×</span>
+                    {{ formatNumber(item.quantity) }}
+                  </p>
+                </div>
+
+                <div class="item__price">
+                  <span class="item__price-label">Thành tiền</span>
+                  <strong class="item__price-value">
+                    {{ formatCurrency(item.subtotal) }}
+                  </strong>
+                  <span class="item__chevron" aria-hidden="true">›</span>
+                </div>
+              </li>
+            </ul>
+          </section>
+
+          <!-- ── Phương thức thanh toán ──────────────────── -->
+          <section class="card">
+            <h2 class="card__title">Phương thức thanh toán</h2>
+            <div class="info-grid info-grid--2">
+              <div class="info-row">
+                <dt class="info-row__label">Phương thức</dt>
+                <dd class="info-row__value">
+                  {{ order.payment?.paymentMethod ? getPaymentMethodLabel(order.payment.paymentMethod) : '—' }}
+                </dd>
+              </div>
+              <div class="info-row">
+                <dt class="info-row__label">Trạng thái</dt>
+                <dd class="info-row__value">
+                  <span
+                    v-if="order.payment?.paymentStatus"
+                    class="status-chip status-chip--{{ getPaymentStatusTone(order.payment.paymentStatus) }}"
+                  >
+                    {{ getPaymentStatusLabel(order.payment.paymentStatus) }}
+                  </span>
+                  <span v-else>—</span>
+                </dd>
+              </div>
+              <div class="info-row">
+                <dt class="info-row__label">Số tiền</dt>
+                <dd class="info-row__value">
+                  {{ order.payment?.amount != null ? formatCurrency(order.payment.amount) : '—' }}
+                </dd>
+              </div>
+              <div class="info-row">
+                <dt class="info-row__label">Thời gian thanh toán</dt>
+                <dd class="info-row__value">
+                  {{ order.payment?.paidAt ? formatDateTime(order.payment.paidAt) : '—' }}
+                </dd>
+              </div>
+            </div>
+          </section>
+
+          <!-- ── Thanh toán lại (ZaloPay PENDING) ────────── -->
+          <section
+            v-if="canRepayZaloPay"
+            class="repay-card"
+            role="region"
+            aria-label="Thanh toán lại qua ZaloPay"
+          >
+            <div class="repay-card__icon" aria-hidden="true">⚡</div>
+            <div class="repay-card__body">
+              <p class="repay-card__title">
+                Bạn đã đóng cửa sổ thanh toán ZaloPay?
+              </p>
+              <p class="repay-card__desc">
+                Đơn hàng vẫn đang chờ thanh toán.
+                Nhấn nút bên dưới để mở lại liên kết ZaloPay mà không cần tạo đơn mới.
+              </p>
+              <BaseButton
+                variant="primary"
+                :loading="repaying"
+                :disabled="repaying"
+                @click="retryZaloPay"
+              >
+                Thanh toán ngay qua ZaloPay
               </BaseButton>
             </div>
-          </div>
-        </header>
+          </section>
 
-        <!-- ── Admin read-only notice ─────────────────────────── -->
-        <section v-if="isAdmin" class="order-detail-view__readonly-banner" role="status">
-          <span class="order-detail-view__readonly-dot" aria-hidden="true" />
-          <p class="order-detail-view__readonly-text">
-            <strong>Chế độ xem.</strong>
-            Admin chỉ có quyền truy cập đọc. Mọi thao tác thay đổi trạng thái đơn hàng
-            thuộc về Buyer hoặc Supplier.
-          </p>
-        </section>
-
-        <!-- ── Thông tin đơn hàng ─────────────────────────────── -->
-        <section class="order-detail-view__section">
-          <h2 class="order-detail-view__section-title">Thông tin đơn hàng</h2>
-          <dl class="order-detail-view__dl order-detail-view__dl--2col">
-            <div class="order-detail-view__dl-row">
-              <dt>Mã đơn</dt>
-              <dd>{{ order.orderCode }}</dd>
+          <!-- ── Hoàn tiền ──────────────────────────────── -->
+          <section
+            v-if="showRefund"
+            class="refund-card refund-card--{{ refundTone }}"
+          >
+            <div class="refund-card__icon" aria-hidden="true">
+              <span>↺</span>
             </div>
-            <div class="order-detail-view__dl-row">
-              <dt>Ngày tạo</dt>
-              <dd>{{ order.createdAt ? formatDateTime(order.createdAt) : '—' }}</dd>
-            </div>
-            <div class="order-detail-view__dl-row">
-              <dt>Cập nhật</dt>
-              <dd>{{ order.updatedAt ? formatDateTime(order.updatedAt) : '—' }}</dd>
-            </div>
-          </dl>
-        </section>
-
-        <!-- ── Nhà cung cấp (BUYER + ADMIN) ────────────────────── -->
-        <section v-if="isBuyer || isAdmin" class="order-detail-view__section">
-          <h2 class="order-detail-view__section-title">Nhà cung cấp</h2>
-          <p class="order-detail-view__plain-text">
-            {{ order.supplierCompanyName || '—' }}
-          </p>
-        </section>
-
-        <!-- ── Khách hàng (SUPPLIER + ADMIN) ───────────────────── -->
-        <section v-if="isSupplier || isAdmin" class="order-detail-view__section">
-          <h2 class="order-detail-view__section-title">Khách hàng</h2>
-          <dl class="order-detail-view__dl">
-            <div class="order-detail-view__dl-row">
-              <dt>Tên công ty</dt>
-              <dd>{{ order.buyerCompanyName || '—' }}</dd>
-            </div>
-          </dl>
-        </section>
-
-        <!-- ── Thông tin giao hàng ───────────────────────────── -->
-        <section class="order-detail-view__section">
-          <h2 class="order-detail-view__section-title">Thông tin giao hàng</h2>
-          <dl class="order-detail-view__dl">
-            <div class="order-detail-view__dl-row">
-              <dt>Tên người nhận</dt>
-              <dd>{{ order.shippingCompanyName || '—' }}</dd>
-            </div>
-            <div class="order-detail-view__dl-row">
-              <dt>Số điện thoại</dt>
-              <dd>{{ order.shippingPhone || '—' }}</dd>
-            </div>
-            <div class="order-detail-view__dl-row">
-              <dt>Địa chỉ giao hàng</dt>
-              <dd>{{ order.shippingAddress || '—' }}</dd>
-            </div>
-          </dl>
-        </section>
-
-        <!-- ── Sản phẩm ──────────────────────────────────────── -->
-        <section class="order-detail-view__section">
-          <h2 class="order-detail-view__section-title">Sản phẩm</h2>
-          <ul class="order-detail-view__items">
-            <li
-              v-for="item in order.items"
-              :key="item.id"
-              class="order-detail-view__item"
-            >
-              <!-- Product image -->
-              <div class="order-detail-view__item-img-wrap">
-                <img
-                  v-if="item.productImageUrl"
-                  :src="item.productImageUrl"
-                  :alt="item.productName"
-                  class="order-detail-view__item-img"
-                  @error="onImgError"
-                />
-              </div>
-
-              <!-- Product info -->
-              <div class="order-detail-view__item-info">
-                <span class="order-detail-view__item-name">{{ item.productName }}</span>
-                <span class="order-detail-view__item-price">
-                  {{ formatCurrency(item.unitPrice) }} × {{ item.quantity }}
-                </span>
-              </div>
-
-              <!-- Subtotal -->
-              <div class="order-detail-view__item-subtotal">
-                {{ formatCurrency(item.subtotal) }}
-              </div>
-            </li>
-          </ul>
-        </section>
-
-        <!-- ── Thanh toán ────────────────────────────────────── -->
-        <section class="order-detail-view__section">
-          <h2 class="order-detail-view__section-title">Thanh toán</h2>
-          <dl class="order-detail-view__pricing">
-
-            <div class="order-detail-view__pricing-row">
-              <dt>Tạm tính</dt>
-              <dd>{{ formatCurrency(order.subtotal) }}</dd>
-            </div>
-
-            <template v-if="order.commissionRate != null && order.commissionAmount != null">
-              <div class="order-detail-view__pricing-row">
-                <dt>Hoa hồng</dt>
-                <dd>{{ formatNumber(order.commissionRate) }}%</dd>
-              </div>
-              <div class="order-detail-view__pricing-row">
-                <dt>Số tiền hoa hồng</dt>
-                <dd>{{ formatCurrency(order.commissionAmount) }}</dd>
-              </div>
-            </template>
-
-            <div
-              v-if="order.commissionRate == null && order.commissionAmount == null"
-              class="order-detail-view__commission-note"
-            >
-              Hoa hồng sẽ được tính khi đơn hoàn thành.
-            </div>
-
-            <div class="order-detail-view__pricing-row order-detail-view__pricing-row--total">
-              <dt>Tổng cộng</dt>
-              <dd>{{ formatCurrency(order.totalAmount) }}</dd>
-            </div>
-          </dl>
-        </section>
-
-        <!-- ── Phương thức thanh toán ─────────────────────────── -->
-        <section class="order-detail-view__section">
-          <h2 class="order-detail-view__section-title">Phương thức thanh toán</h2>
-          <dl class="order-detail-view__dl">
-            <div class="order-detail-view__dl-row">
-              <dt>Phương thức</dt>
-              <dd>{{ order.payment?.paymentMethod ? getPaymentMethodLabel(order.payment.paymentMethod) : '—' }}</dd>
-            </div>
-            <div class="order-detail-view__dl-row">
-              <dt>Trạng thái</dt>
-              <dd>
+            <div class="refund-card__body">
+              <p class="refund-card__title">
                 <span
                   v-if="order.payment?.paymentStatus"
-                  :class="badgeClass(order.payment.paymentStatus, PAYMENT_STATUS_TONE)"
+                  class="status-chip status-chip--{{ getPaymentStatusTone(order.payment.paymentStatus) }}"
                 >
                   {{ getPaymentStatusLabel(order.payment.paymentStatus) }}
                 </span>
-                <span v-else>—</span>
-              </dd>
+                <span>{{ refundMessage }}</span>
+              </p>
+              <p v-if="order.payment?.amount != null" class="refund-card__amount">
+                Số tiền hoàn:
+                <strong>{{ formatCurrency(order.payment.amount) }}</strong>
+              </p>
             </div>
-            <div class="order-detail-view__dl-row">
-              <dt>Số tiền</dt>
-              <dd>{{ order.payment?.amount != null ? formatCurrency(order.payment.amount) : '—' }}</dd>
-            </div>
-            <div class="order-detail-view__dl-row">
-              <dt>Thời gian thanh toán</dt>
-              <dd>{{ order.payment?.paidAt ? formatDateTime(order.payment.paidAt) : '—' }}</dd>
-            </div>
-          </dl>
-        </section>
+          </section>
 
-        <!-- ── Hoàn tiền ─────────────────────────────────────── -->
-        <section
-          v-if="showRefund"
-          class="order-detail-view__section order-detail-view__refund-section"
-          :class="`order-detail-view__refund-section--${refundTone}`"
-        >
-          <div class="order-detail-view__refund-inner">
-            <span
-              v-if="order.payment?.paymentStatus"
-              :class="badgeClass(order.payment.paymentStatus, PAYMENT_STATUS_TONE)"
-            >
-              {{ getPaymentStatusLabel(order.payment.paymentStatus) }}
-            </span>
-            <p class="order-detail-view__refund-message">{{ refundMessage }}</p>
-            <p v-if="order.payment?.amount != null" class="order-detail-view__refund-amount">
-              Số tiền hoàn: <strong>{{ formatCurrency(order.payment.amount) }}</strong>
-            </p>
-          </div>
-        </section>
+          <!-- ── Lịch sử trạng thái ────────────────────── -->
+          <section class="card">
+            <h2 class="card__title">Lịch sử trạng thái</h2>
 
-        <!-- ── Lịch sử trạng thái ───────────────────────────── -->
-        <section class="order-detail-view__section">
-          <h2 class="order-detail-view__section-title">Lịch sử trạng thái</h2>
+            <BaseEmpty
+              v-if="history.length === 0 && historyError"
+              description="Không thể tải lịch sử trạng thái."
+            />
 
-          <!-- Error state -->
-          <BaseEmpty
-            v-if="history.length === 0 && historyError"
-            description="Không thể tải lịch sử trạng thái."
-          />
+            <BaseEmpty
+              v-else-if="history.length === 0 && !historyError"
+              description="Chưa có lịch sử trạng thái."
+            />
 
-          <!-- Empty state -->
-          <BaseEmpty
-            v-else-if="history.length === 0 && !historyError"
-            description="Chưa có lịch sử trạng thái."
-          />
-
-          <!-- Timeline -->
-          <ol v-else class="order-detail-view__timeline">
-            <li
-              v-for="(entry, index) in history"
-              :key="entry.id"
-              class="order-detail-view__timeline-entry"
-            >
-              <!-- Connector line above (hidden for first item via CSS) -->
-              <div class="order-detail-view__timeline-connector" aria-hidden="true" />
-
-              <!-- Dot -->
-              <div class="order-detail-view__timeline-dot" aria-hidden="true" />
-
-              <!-- Content -->
-              <div class="order-detail-view__timeline-body">
-                <div class="order-detail-view__timeline-meta">
-                  <span :class="badgeClass(entry.status, ORDER_STATUS_TONE)">
-                    {{ entry.status }}
-                  </span>
-                  <time class="order-detail-view__timeline-time">
-                    {{ entry.createdAt ? formatDateTime(entry.createdAt) : '—' }}
-                  </time>
+            <ol v-else class="timeline">
+              <li
+                v-for="entry in history"
+                :key="entry.id"
+                class="timeline__entry"
+              >
+                <span class="timeline__node" aria-hidden="true" />
+                <div class="timeline__body">
+                  <div class="timeline__meta">
+                    <span
+                      class="status-chip status-chip--{{ getOrderStatusTone(entry.status) }}"
+                    >
+                      {{ getOrderStatusLabel(entry.status) }}
+                    </span>
+                    <time class="timeline__time">
+                      {{ entry.createdAt ? formatDateTime(entry.createdAt) : '—' }}
+                    </time>
+                  </div>
+                  <p
+                    v-if="entry.note"
+                    class="timeline__note"
+                  >{{ entry.note }}</p>
                 </div>
-                <p
-                  v-if="entry.note"
-                  class="order-detail-view__timeline-note"
-                >{{ entry.note }}</p>
+              </li>
+            </ol>
+          </section>
+
+          <!-- ── Thao tác đơn hàng (SUPPLIER only) ────────── -->
+          <section
+            v-if="isSupplier && availableActions.length > 0"
+            class="card"
+          >
+            <h2 class="card__title">Thao tác đơn hàng</h2>
+            <p class="card__subtitle">
+              Các bước tiếp theo cho đơn hàng này.
+            </p>
+            <div class="action-rail">
+              <BaseButton
+                v-for="action in availableActions"
+                :key="action.key"
+                :variant="action.variant === 'danger' ? 'danger' : 'primary'"
+                block
+                :disabled="actionSubmitting !== ''"
+                @click="runSupplierAction(action)"
+              >
+                {{ action.label }}
+              </BaseButton>
+            </div>
+          </section>
+
+        </div>
+
+        <!-- ── Sidebar column ───────────────────────────── -->
+        <aside class="order-detail-view__sidebar">
+
+          <!-- ── Đối tác (party card) ─────────────────── -->
+          <section class="card">
+            <h2 class="card__title">Đối tác</h2>
+
+            <div class="party">
+              <div class="party__row">
+                <span
+                  class="party__role"
+                  :class="isBuyer || isAdmin ? 'party__role--buyer' : 'party__role--supplier'"
+                >
+                  {{ (isBuyer || isAdmin) ? 'Nhà cung cấp' : 'Khách hàng' }}
+                </span>
+                <p class="party__name">
+                  {{ (isBuyer || isAdmin)
+                      ? (order.supplierCompanyName || '—')
+                      : (order.buyerCompanyName || '—') }}
+                </p>
               </div>
-            </li>
-          </ol>
-        </section>
 
-        <!-- ── Thao tác đơn hàng (SUPPLIER only) ──────────────── -->
-        <section v-if="isSupplier && availableActions.length > 0" class="order-detail-view__section">
-          <h2 class="order-detail-view__section-title">Thao tác đơn hàng</h2>
-          <div class="order-detail-view__actions-list">
-            <BaseButton
-              v-for="action in availableActions"
-              :key="action.key"
-              :variant="action.variant === 'danger' ? 'danger' : 'primary'"
-              block
-              :disabled="actionSubmitting !== ''"
-              @click="runSupplierAction(action)"
-            >
-              {{ action.label }}
-            </BaseButton>
-          </div>
-        </section>
+              <div
+                v-if="isAdmin"
+                class="party__row party__row--secondary"
+              >
+                <span class="party__role party__role--buyer">
+                  Khách hàng
+                </span>
+                <p class="party__name">
+                  {{ order.buyerCompanyName || '—' }}
+                </p>
+              </div>
+            </div>
+          </section>
 
-        <!-- ── Cancel modal (BUYER) ───────────────────────────── -->
-        <BaseModal
-          v-if="showCancelModal"
-          :model-value="showCancelModal"
-          title="Xác nhận hủy đơn hàng"
-          @update:model-value="closeCancelModal"
-        >
-          <p class="order-detail-view__cancel-desc">
-            Vui lòng nhập lý do hủy đơn hàng (bắt buộc).
-          </p>
-          <textarea
-            v-model="cancelReason"
-            class="order-detail-view__textarea"
-            placeholder="Ví dụ: Tôi đã đặt nhầm sản phẩm..."
-            rows="4"
-            maxlength="500"
+          <!-- ── Tóm tắt thanh toán ───────────────────── -->
+          <section class="card pricing-card">
+            <h2 class="card__title">Tóm tắt thanh toán</h2>
+
+            <dl class="pricing">
+              <div class="pricing__row">
+                <dt>Tạm tính</dt>
+                <dd>{{ formatCurrency(order.subtotal) }}</dd>
+              </div>
+
+              <template v-if="order.commissionRate != null && order.commissionAmount != null">
+                <div class="pricing__row">
+                  <dt>Hoa hồng</dt>
+                  <dd>{{ formatNumber(order.commissionRate) }}%</dd>
+                </div>
+                <div class="pricing__row">
+                  <dt>Số tiền hoa hồng</dt>
+                  <dd>{{ formatCurrency(order.commissionAmount) }}</dd>
+                </div>
+              </template>
+
+              <p
+                v-else
+                class="pricing__note"
+              >
+                Hoa hồng sẽ được tính khi đơn hoàn thành.
+              </p>
+
+              <div class="pricing__row pricing__row--total">
+                <dt>Tổng cộng</dt>
+                <dd class="pricing__total-value">
+                  {{ formatCurrency(order.totalAmount) }}
+                </dd>
+              </div>
+            </dl>
+          </section>
+
+        </aside>
+
+      </div>
+
+      <!-- ── Cancel modal (BUYER) ────────────────────────────── -->
+      <BaseModal
+        v-if="showCancelModal"
+        :model-value="showCancelModal"
+        title="Xác nhận hủy đơn hàng"
+        @update:model-value="closeCancelModal"
+      >
+        <p class="modal-hint">
+          Vui lòng nhập lý do hủy đơn hàng (bắt buộc).
+        </p>
+        <textarea
+          v-model="cancelReason"
+          class="modal-textarea"
+          placeholder="Ví dụ: Tôi đã đặt nhầm sản phẩm..."
+          rows="4"
+          maxlength="500"
+          :disabled="cancelSubmitting"
+        />
+        <p class="modal-counter">
+          {{ cancelReason.length }} / 500
+        </p>
+
+        <template #footer>
+          <BaseButton
+            variant="ghost"
             :disabled="cancelSubmitting"
-          />
-          <p class="order-detail-view__char-count">
-            {{ cancelReason.length }} / 500
-          </p>
+            @click="closeCancelModal"
+          >
+            Quay lại
+          </BaseButton>
+          <BaseButton
+            variant="danger"
+            :disabled="cancelDisabled"
+            :loading="cancelSubmitting"
+            @click="submitCancel"
+          >
+            Xác nhận hủy
+          </BaseButton>
+        </template>
+      </BaseModal>
 
-          <template #footer>
-            <BaseButton
-              variant="ghost"
-              :disabled="cancelSubmitting"
-              @click="closeCancelModal"
-            >
-              Quay lại
-            </BaseButton>
-            <BaseButton
-              variant="danger"
-              :disabled="cancelDisabled"
-              :loading="cancelSubmitting"
-              @click="submitCancel"
-            >
-              Xác nhận hủy
-            </BaseButton>
-          </template>
-        </BaseModal>
+      <!-- ── Supplier reject modal ──────────────────────────── -->
+      <BaseModal
+        v-if="showRejectModal"
+        :model-value="showRejectModal"
+        title="Từ chối đơn hàng"
+        @update:model-value="showRejectModal = false"
+      >
+        <p class="modal-hint">
+          Vui lòng nhập lý do từ chối. Lý do sẽ được lưu vào lịch sử đơn hàng.
+        </p>
+        <textarea
+          v-model="rejectReason"
+          class="modal-textarea"
+          rows="4"
+          maxlength="500"
+          placeholder="Ví dụ: Sản phẩm tạm thời hết hàng..."
+          :disabled="rejectSubmitting"
+        />
+        <div class="modal-counter">
+          {{ rejectReason.length }} / 500
+        </div>
 
-        <!-- ── Supplier reject modal ─────────────────────────── -->
-        <BaseModal
-          v-if="showRejectModal"
-          :model-value="showRejectModal"
-          title="Từ chối đơn hàng"
-          @update:model-value="showRejectModal = false"
-        >
-          <p class="order-detail-view__modal-hint">
-            Vui lòng nhập lý do từ chối. Lý do sẽ được lưu vào lịch sử đơn hàng.
-          </p>
-          <textarea
-            v-model="rejectReason"
-            class="order-detail-view__textarea"
-            rows="4"
-            maxlength="500"
-            placeholder="Ví dụ: Sản phẩm tạm thời hết hàng..."
-            :disabled="rejectSubmitting"
-          />
-          <div class="order-detail-view__char-count">
-            {{ rejectReason.length }} / 500
-          </div>
+        <template #footer>
+          <BaseButton variant="secondary" :disabled="rejectSubmitting" @click="showRejectModal = false">
+            Hủy
+          </BaseButton>
+          <BaseButton variant="danger" :disabled="rejectDisabled" :loading="rejectSubmitting" @click="submitReject">
+            Xác nhận từ chối
+          </BaseButton>
+        </template>
+      </BaseModal>
 
-          <template #footer>
-            <BaseButton variant="secondary" :disabled="rejectSubmitting" @click="showRejectModal = false">
-              Hủy
-            </BaseButton>
-            <BaseButton variant="danger" :disabled="rejectDisabled" :loading="rejectSubmitting" @click="submitReject">
-              Xác nhận từ chối
-            </BaseButton>
-          </template>
-        </BaseModal>
-
-      </template>
-    </div>
+    </template>
   </div>
 </template>
 
 <style scoped>
-/* ── Layout ─────────────────────────────────────────────────── */
+/* ─────────────────────────────────────────────────────────────────
+ *  OrderDetailView
+ *  Layout: full-width page header + responsive 2-column body grid
+ *  (main column = sections, sidebar = party + pricing summary).
+ *  No hard-coded colors / spacing — everything via design tokens.
+ * ───────────────────────────────────────────────────────────────── */
 
 .order-detail-view {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  max-width: var(--container-2xl);
+  margin: 0 auto;
   width: 100%;
 }
 
-.order-detail-view__container {
-  max-width: 960px;
-  margin: 0 auto;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-5);
-}
+/* ── State placeholders ────────────────────────────────────── */
 
 .order-detail-view__state {
   background: var(--color-surface);
   border-radius: var(--radius-lg);
   border: 1px solid var(--color-border);
-  min-height: 200px;
+  min-height: 240px;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
-/* ── Section ────────────────────────────────────────────────── */
+/* ── Page header ───────────────────────────────────────────── */
 
-.order-detail-view__section {
-  background: var(--color-surface);
-  border-radius: var(--radius-lg);
-  border: 1px solid var(--color-border);
-  padding: var(--space-5);
+.order-detail-view__header {
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
 }
 
-.order-detail-view__section-title {
-  margin: 0;
-  font-size: var(--font-md);
-  font-weight: var(--weight-semibold);
-  color: var(--color-text-primary);
-}
-
-/* ── Header card ────────────────────────────────────────────── */
-
-.order-detail-view__header-card {
-  background: var(--color-surface);
-  border-radius: var(--radius-lg);
-  border: 1px solid var(--color-border);
-  padding: var(--space-5);
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-}
-
-/* ── Read-only notice (ADMIN) ────────────────────────── */
-.order-detail-view__readonly-banner {
+.order-detail-view__header-top {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
-  background-color: var(--color-info-bg, #eff6ff);
-  color: var(--color-info, #1e40af);
-  border: 1px solid var(--color-info, #2563eb);
-  border-radius: var(--radius-lg);
-  padding: var(--space-3) var(--space-4);
-}
-
-.order-detail-view__readonly-dot {
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  border-radius: var(--radius-full);
-  background-color: var(--color-info, #2563eb);
-  flex-shrink: 0;
-}
-
-.order-detail-view__readonly-text {
-  margin: 0;
-  font-size: var(--font-sm);
-  color: var(--color-info, #1e40af);
-}
-
-.order-detail-view__readonly-text strong {
-  font-weight: var(--weight-semibold);
-}
-
-.order-detail-view__back-nav {
-  font-size: var(--font-sm);
 }
 
 .order-detail-view__back-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0;
   background: none;
   border: none;
-  padding: 0;
   color: var(--color-primary);
+  font-size: var(--font-sm);
   font-weight: var(--weight-medium);
   cursor: pointer;
-  font-size: inherit;
 }
 
 .order-detail-view__back-btn:hover {
-  text-decoration: underline;
+  color: var(--color-primary-hover);
+}
+
+.order-detail-view__back-arrow {
+  display: inline-flex;
+  font-size: var(--font-md);
+  line-height: 1;
 }
 
 .order-detail-view__header-main {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: var(--space-4);
   flex-wrap: wrap;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-5);
+  box-shadow: var(--shadow-sm);
 }
 
 .order-detail-view__header-left {
   display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  flex-wrap: wrap;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
 }
 
-.order-detail-view__order-code {
+.order-detail-view__title {
+  margin: 0;
   font-size: var(--font-xl);
   font-weight: var(--weight-bold);
   color: var(--color-text-primary);
+  line-height: var(--leading-tight);
+}
+
+.order-detail-view__order-code {
+  color: var(--color-primary);
+}
+
+.order-detail-view__subtitle {
+  margin: 0;
+  font-size: var(--font-sm);
+  color: var(--color-text-muted);
 }
 
 .order-detail-view__header-right {
   display: flex;
   align-items: center;
   gap: var(--space-3);
+  flex-wrap: wrap;
 }
 
-/* ── Description list ────────────────────────────────────────── */
+/* ── Admin read-only notice ───────────────────────────────── */
 
-.order-detail-view__dl {
+.order-detail-view__notice {
   display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
+  align-items: flex-start;
+  gap: var(--space-3);
+  background-color: var(--color-info-bg);
+  color: var(--color-info);
+  border: 1px solid var(--color-info);
+  border-radius: var(--radius-lg);
+  padding: var(--space-3) var(--space-4);
 }
 
-.order-detail-view__dl--2col {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: var(--space-2) var(--space-6);
-}
-
-.order-detail-view__dl-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: var(--space-4);
-  font-size: var(--font-sm);
-}
-
-.order-detail-view__dl-row dt {
-  color: var(--color-text-muted);
-  font-weight: var(--weight-medium);
+.order-detail-view__notice-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-full);
+  background-color: var(--color-info);
+  color: var(--color-text-inverse);
+  font-style: italic;
+  font-weight: var(--weight-bold);
+  font-size: var(--font-xs);
   flex-shrink: 0;
 }
 
-.order-detail-view__dl-row dd {
+.order-detail-view__notice-text {
+  margin: 0;
+  font-size: var(--font-sm);
+  color: var(--color-info);
+  line-height: var(--leading-normal);
+}
+
+.order-detail-view__notice-text strong {
+  font-weight: var(--weight-semibold);
+}
+
+/* ── Body grid ─────────────────────────────────────────────── */
+
+.order-detail-view__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: var(--space-5);
+  align-items: start;
+}
+
+.order-detail-view__main,
+.order-detail-view__sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  min-width: 0;
+}
+
+/* ── Card primitive ────────────────────────────────────────── */
+
+.card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  box-shadow: var(--shadow-sm);
+}
+
+.card__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.card__title {
+  margin: 0;
+  font-size: var(--font-md);
+  font-weight: var(--weight-semibold);
   color: var(--color-text-primary);
-  text-align: right;
+}
+
+.card__subtitle {
+  margin: calc(-1 * var(--space-2)) 0 0;
+  font-size: var(--font-sm);
+  color: var(--color-text-muted);
+  line-height: var(--leading-normal);
+}
+
+.card__hint {
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+}
+
+/* ── Info grid ─────────────────────────────────────────────── */
+
+.info-grid {
+  display: grid;
+  gap: var(--space-3) var(--space-5);
+}
+
+.info-grid--2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.info-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.info-row--full {
+  grid-column: 1 / -1;
+}
+
+.info-row__label {
+  font-size: var(--font-xs);
+  font-weight: var(--weight-medium);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin: 0;
+}
+
+.info-row__value {
+  margin: 0;
+  font-size: var(--font-sm);
+  color: var(--color-text-primary);
+  font-weight: var(--weight-medium);
   word-break: break-word;
 }
 
-/* ── Plain text ──────────────────────────────────────────────── */
+/* ── Item list ─────────────────────────────────────────────── */
 
-.order-detail-view__plain-text {
-  margin: 0;
-  font-size: var(--font-sm);
-  color: var(--color-text-secondary);
-}
-
-/* ── Items list ──────────────────────────────────────────────── */
-
-.order-detail-view__items {
+.item-list {
   list-style: none;
   margin: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
 }
 
-.order-detail-view__item {
-  display: flex;
-  align-items: center;
+.item {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr) auto;
   gap: var(--space-4);
-  padding: var(--space-3) 0;
-  border-bottom: 1px solid var(--color-border);
+  padding: var(--space-4) 0;
+  border-top: 1px solid var(--color-border);
+  align-items: center;
 }
 
-.order-detail-view__item:last-child {
-  border-bottom: none;
+.item:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+
+.item:last-child {
   padding-bottom: 0;
 }
 
-.order-detail-view__item-img-wrap {
-  width: 64px;
-  height: 64px;
-  flex-shrink: 0;
+.item__img-wrap {
+  width: 72px;
+  height: 72px;
   border-radius: var(--radius-md);
   background-color: var(--color-surface-alt);
   overflow: hidden;
@@ -862,163 +1051,409 @@ function badgeClass(status, toneMap) {
   justify-content: center;
 }
 
-.order-detail-view__item-img-wrap--hidden {
+.item__img-wrap--hidden {
   display: none;
 }
 
-.order-detail-view__item-img {
+.item__img {
   width: 100%;
   height: 100%;
   object-fit: cover;
 }
 
-.order-detail-view__item-info {
-  flex: 1;
-  min-width: 0;
+.item__body {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  min-width: 0;
 }
 
-.order-detail-view__item-name {
-  font-size: var(--font-sm);
-  font-weight: var(--weight-medium);
-  color: var(--color-text-primary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.order-detail-view__item-price {
-  font-size: var(--font-xs);
-  color: var(--color-text-muted);
-}
-
-.order-detail-view__item-subtotal {
+.item__name {
+  margin: 0;
   font-size: var(--font-sm);
   font-weight: var(--weight-semibold);
   color: var(--color-text-primary);
-  white-space: nowrap;
+  line-height: var(--leading-snug);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
-/* ── Pricing ─────────────────────────────────────────────────── */
-
-.order-detail-view__pricing {
-  display: flex;
-  flex-direction: column;
+.item__meta {
+  margin: 0;
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+  display: inline-flex;
+  align-items: center;
   gap: var(--space-2);
 }
 
-.order-detail-view__pricing-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  font-size: var(--font-sm);
-}
-
-.order-detail-view__pricing-row dt {
+.item__sep {
   color: var(--color-text-muted);
 }
 
-.order-detail-view__pricing-row dd {
+.item__price {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  white-space: nowrap;
+}
+
+.item__price-label {
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.item__price-value {
+  font-size: var(--font-md);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-primary);
+}
+
+/* ── Item link state ──────────────────────────────────────── */
+
+.item__chevron {
+  font-size: var(--font-xl);
+  line-height: 1;
+  color: var(--color-text-muted);
+  transition: transform var(--transition-fast), color var(--transition-fast);
+}
+
+.item--link {
+  cursor: pointer;
+  border-radius: var(--radius-md);
+  transition:
+    background-color var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+.item--link:hover {
+  background-color: var(--color-surface-alt);
+  box-shadow: var(--shadow-sm);
+}
+
+.item--link:hover .item__chevron {
+  color: var(--color-primary);
+  transform: translateX(2px);
+}
+
+.item--link:focus {
+  outline: none;
+  background-color: var(--color-surface-alt);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+}
+
+.item--link:focus .item__chevron {
+  color: var(--color-primary);
+}
+
+/* ── Status chip ──────────────────────────────────────────── */
+
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-full);
+  font-size: var(--font-xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  background-color: var(--color-surface-alt);
+  color: var(--color-text-muted);
+}
+
+.status-chip--warning {
+  background-color: var(--color-warning-bg);
+  color: var(--color-warning);
+}
+
+.status-chip--info {
+  background-color: var(--color-info-bg);
+  color: var(--color-info);
+}
+
+.status-chip--success {
+  background-color: var(--color-success-bg);
+  color: var(--color-success);
+}
+
+.status-chip--danger {
+  background-color: var(--color-danger-bg);
+  color: var(--color-danger);
+}
+
+.status-chip--neutral {
+  background-color: var(--color-surface-alt);
+  color: var(--color-text-muted);
+}
+
+/* Header status pill: bigger, bolder */
+.order-detail-view__status-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-full);
+  font-size: var(--font-sm);
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  background-color: var(--color-surface-alt);
+  color: var(--color-text-secondary);
+}
+
+.order-detail-view__status-pill--warning {
+  background-color: var(--color-warning-bg);
+  color: var(--color-warning);
+}
+
+.order-detail-view__status-pill--info {
+  background-color: var(--color-info-bg);
+  color: var(--color-info);
+}
+
+.order-detail-view__status-pill--success {
+  background-color: var(--color-success-bg);
+  color: var(--color-success);
+}
+
+.order-detail-view__status-pill--danger {
+  background-color: var(--color-danger-bg);
+  color: var(--color-danger);
+}
+
+.order-detail-view__status-pill--neutral {
+  background-color: var(--color-surface-alt);
+  color: var(--color-text-muted);
+}
+
+/* ── Pricing card ──────────────────────────────────────────── */
+
+.pricing {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.pricing__row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  font-size: var(--font-sm);
+}
+
+.pricing__row dt {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-weight: var(--weight-regular);
+}
+
+.pricing__row dd {
+  margin: 0;
   color: var(--color-text-primary);
   font-weight: var(--weight-medium);
 }
 
-.order-detail-view__pricing-row--total {
-  padding-top: var(--space-3);
-  border-top: 1px solid var(--color-border);
-  margin-top: var(--space-1);
-}
-
-.order-detail-view__pricing-row--total dt,
-.order-detail-view__pricing-row--total dd {
-  font-size: var(--font-md);
-  font-weight: var(--weight-bold);
-  color: var(--color-text-primary);
-}
-
-.order-detail-view__commission-note {
+.pricing__note {
+  margin: 0;
   font-size: var(--font-xs);
   color: var(--color-text-muted);
   font-style: italic;
-  padding: var(--space-1) 0;
 }
 
-/* ── Refund banner ──────────────────────────────────────────── */
-
-.order-detail-view__refund-section {
-  padding: var(--space-4);
+.pricing__row--total {
+  margin-top: var(--space-2);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-border);
 }
 
-.order-detail-view__refund-inner {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--space-3);
-}
-
-.order-detail-view__refund-message {
-  margin: 0;
+.pricing__row--total dt {
   font-size: var(--font-sm);
-  color: var(--color-text-secondary);
-}
-
-.order-detail-view__refund-amount {
-  margin: 0;
-  font-size: var(--font-sm);
-  color: var(--color-text-secondary);
-  width: 100%;
-}
-
-.order-detail-view__refund-amount strong {
+  font-weight: var(--weight-semibold);
   color: var(--color-text-primary);
 }
 
-/* ── Timeline ────────────────────────────────────────────────── */
-
-.order-detail-view__timeline {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
+.pricing__total-value {
+  font-size: var(--font-lg);
+  font-weight: var(--weight-bold);
+  color: var(--color-primary);
 }
 
-.order-detail-view__timeline-entry {
+/* ── Refund banner ─────────────────────────────────────────── */
+
+.refund-card {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-4);
+  padding: var(--space-5);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border);
+  background-color: var(--color-surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.refund-card--warning {
+  background-color: var(--color-warning-bg);
+  border-color: var(--color-warning);
+}
+
+.refund-card--info {
+  background-color: var(--color-info-bg);
+  border-color: var(--color-info);
+}
+
+.refund-card__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-full);
+  background-color: var(--color-surface);
+  color: var(--color-text-primary);
+  font-size: var(--font-xl);
+  font-weight: var(--weight-bold);
+  flex-shrink: 0;
+  box-shadow: var(--shadow-sm);
+}
+
+.refund-card--warning .refund-card__icon {
+  color: var(--color-warning);
+}
+
+.refund-card--info .refund-card__icon {
+  color: var(--color-info);
+}
+
+.refund-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.refund-card__title {
+  margin: 0;
+  font-size: var(--font-sm);
+  color: var(--color-text-primary);
+  font-weight: var(--weight-medium);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.refund-card__amount {
+  margin: 0;
+  font-size: var(--font-sm);
+  color: var(--color-text-secondary);
+}
+
+.refund-card__amount strong {
+  color: var(--color-text-primary);
+  font-weight: var(--weight-semibold);
+}
+
+/* ── Re-pay CTA (ZaloPay PENDING) ─────────────────────────── */
+
+.repay-card {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-4);
+  padding: var(--space-5);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-primary);
+  background-color: var(--color-primary-soft);
+  box-shadow: var(--shadow-sm);
+}
+
+.repay-card__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-full);
+  background-color: var(--color-primary);
+  color: var(--color-text-inverse);
+  font-size: var(--font-xl);
+  flex-shrink: 0;
+  box-shadow: var(--shadow-sm);
+}
+
+.repay-card__body {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-3);
+  min-width: 0;
+  flex: 1;
+}
+
+.repay-card__title {
+  margin: 0;
+  font-size: var(--font-md);
+  color: var(--color-text-primary);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-snug);
+}
+
+.repay-card__desc {
+  margin: 0;
+  font-size: var(--font-sm);
+  color: var(--color-text-secondary);
+  line-height: var(--leading-normal);
+}
+
+/* ── Timeline ──────────────────────────────────────────────── */
+
+.timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  position: relative;
+}
+
+.timeline::before {
+  content: '';
+  position: absolute;
+  left: 7px;
+  top: 6px;
+  bottom: 6px;
+  width: 2px;
+  background-color: var(--color-border);
+  border-radius: var(--radius-full);
+}
+
+.timeline__entry {
   position: relative;
   display: flex;
   gap: var(--space-3);
-  padding-bottom: var(--space-4);
+  padding: 0;
 }
 
-/* Hide connector for the very first (oldest) entry */
-.order-detail-view__timeline-entry:first-child .order-detail-view__timeline-connector {
-  display: none;
-}
-
-/* Timeline spine */
-.order-detail-view__timeline-connector {
+.timeline__node {
   position: absolute;
-  left: 7px;
-  top: -16px;
-  width: 2px;
-  height: 16px;
-  background-color: var(--color-border);
-}
-
-.order-detail-view__timeline-dot {
+  left: calc(-1 * var(--space-4) - 4px);
+  top: 4px;
   width: 16px;
   height: 16px;
   border-radius: var(--radius-full);
-  background-color: var(--color-border-strong);
-  flex-shrink: 0;
-  margin-top: 3px;
-  position: relative;
-  z-index: 1;
+  background-color: var(--color-surface);
+  border: 3px solid var(--color-primary);
+  box-shadow: 0 0 0 4px var(--color-surface);
 }
 
-.order-detail-view__timeline-body {
+.timeline__body {
   flex: 1;
   min-width: 0;
   display: flex;
@@ -1026,87 +1461,105 @@ function badgeClass(status, toneMap) {
   gap: var(--space-1);
 }
 
-.order-detail-view__timeline-meta {
+.timeline__meta {
   display: flex;
   align-items: center;
   gap: var(--space-3);
   flex-wrap: wrap;
 }
 
-.order-detail-view__timeline-time {
+.timeline__time {
   font-size: var(--font-xs);
   color: var(--color-text-muted);
+  font-weight: var(--weight-medium);
 }
 
-.order-detail-view__timeline-note {
+.timeline__note {
   margin: 0;
-  font-size: var(--font-xs);
+  font-size: var(--font-sm);
   color: var(--color-text-secondary);
   line-height: var(--leading-relaxed);
   white-space: pre-wrap;
   word-break: break-word;
+  padding: var(--space-2) var(--space-3);
+  background-color: var(--color-surface-alt);
+  border-radius: var(--radius-md);
 }
 
-/* ── Badges ─────────────────────────────────────────────────── */
+/* ── Party card ────────────────────────────────────────────── */
 
-.badge {
+.party {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.party__row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.party__row:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.party__row--secondary {
+  padding-top: var(--space-3);
+  padding-bottom: 0;
+  border-bottom: none;
+  border-top: 1px dashed var(--color-border);
+}
+
+.party__role {
   display: inline-flex;
-  align-items: center;
+  align-self: flex-start;
   padding: 2px var(--space-2);
-  border-radius: var(--radius-full);
+  border-radius: var(--radius-sm);
   font-size: var(--font-xs);
   font-weight: var(--weight-semibold);
-  letter-spacing: 0.01em;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
-  white-space: nowrap;
 }
 
-.badge--warning {
-  background-color: #fef3c7;
-  color: #92400e;
+.party__role--buyer {
+  background-color: var(--color-info-bg);
+  color: var(--color-info);
 }
 
-.badge--info {
-  background-color: #dbeafe;
-  color: #1e40af;
+.party__role--supplier {
+  background-color: var(--color-success-bg);
+  color: var(--color-success);
 }
 
-.badge--success {
-  background-color: #d1fae5;
-  color: #065f46;
+.party__name {
+  margin: 0;
+  font-size: var(--font-md);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-primary);
 }
 
-.badge--danger {
-  background-color: #fee2e2;
-  color: #991b1b;
-}
+/* ── Action rail (Supplier) ────────────────────────────────── */
 
-.badge--neutral {
-  background-color: var(--color-surface-alt);
-  color: var(--color-text-muted);
-}
-
-/* ── Cancel modal ───────────────────────────────────────────── */
-
-.order-detail-view__cancel-desc {
-  margin: 0 0 var(--space-3);
-  font-size: var(--font-sm);
-  color: var(--color-text-secondary);
-}
-
-.order-detail-view__modal-hint {
-  margin: 0 0 var(--space-3);
-  font-size: var(--font-sm);
-  color: var(--color-text-secondary);
-}
-
-.order-detail-view__actions-list {
+.action-rail {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
 }
 
-.order-detail-view__textarea {
+/* ── Modals ────────────────────────────────────────────────── */
+
+.modal-hint {
+  margin: 0 0 var(--space-3);
+  font-size: var(--font-sm);
+  color: var(--color-text-secondary);
+  line-height: var(--leading-normal);
+}
+
+.modal-textarea {
   width: 100%;
   padding: var(--space-3);
   border: 1px solid var(--color-border-strong);
@@ -1117,48 +1570,84 @@ function badgeClass(status, toneMap) {
   background-color: var(--color-surface);
   resize: vertical;
   box-sizing: border-box;
-  transition: border-color var(--transition-fast);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 
-.order-detail-view__textarea:focus {
+.modal-textarea:focus {
   outline: none;
   border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
 }
 
-.order-detail-view__textarea::placeholder {
+.modal-textarea::placeholder {
   color: var(--color-text-muted);
 }
 
-.order-detail-view__textarea:disabled {
+.modal-textarea:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
 
-.order-detail-view__char-count {
+.modal-counter {
   margin: var(--space-1) 0 0;
   font-size: var(--font-xs);
   color: var(--color-text-muted);
   text-align: right;
 }
 
-/* ── Responsive ─────────────────────────────────────────────── */
+/* ── Responsive ────────────────────────────────────────────── */
+
+@media (max-width: 1024px) {
+  .order-detail-view__grid {
+    grid-template-columns: 1fr;
+  }
+}
 
 @media (max-width: 640px) {
-  .order-detail-view__dl--2col {
-    grid-template-columns: 1fr;
+  .order-detail-view__title {
+    font-size: var(--font-lg);
   }
 
   .order-detail-view__header-main {
     flex-direction: column;
-    align-items: flex-start;
+    align-items: stretch;
   }
 
-  .order-detail-view__order-code {
-    font-size: var(--font-lg);
+  .order-detail-view__header-right {
+    justify-content: space-between;
   }
 
-  .order-detail-view__item {
-    gap: var(--space-3);
+  .info-grid--2 {
+    grid-template-columns: 1fr;
+  }
+
+  .item {
+    grid-template-columns: 56px minmax(0, 1fr);
+    grid-template-rows: auto auto;
+    row-gap: var(--space-2);
+  }
+
+  .item__price {
+    grid-column: 1 / -1;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: baseline;
+    border-top: 1px dashed var(--color-border);
+    padding-top: var(--space-2);
+  }
+
+  .item__img-wrap {
+    width: 56px;
+    height: 56px;
+  }
+
+  .repay-card {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .repay-card__body {
+    align-items: stretch;
   }
 }
 </style>

@@ -17,6 +17,7 @@
 import { reactive, computed, watch } from 'vue'
 import BaseInput from '@/components/common/BaseInput.vue'
 import BaseSelect from '@/components/common/BaseSelect.vue'
+import BaseImageUploader from '@/components/common/BaseImageUploader.vue'
 
 const props = defineProps({
   initialProduct: {
@@ -53,6 +54,11 @@ const form = reactive({
   sku: '',
   description: '',
   imageUrl: '',
+  // Cloudinary publicId captured during upload. Sent to the backend so it
+  // can delete the previous asset atomically (see
+  // ProductServiceImpl#replaceProductImage). Cleared after each save so a
+  // subsequent submit without re-upload is a no-op.
+  imagePublicId: '',
   stockQuantity: 0,
   categoryId: null,
   supplierCompanyId: null,
@@ -87,6 +93,11 @@ watch(
       form.sku = p.sku || ''
       form.description = p.description || ''
       form.imageUrl = p.imageUrl || ''
+      // publicId is intentionally NOT loaded here: backend's ProductResponse
+      // does not expose it (kept internal for delete). The backend will
+      // look up the previous publicId from DB when deciding what to delete
+      // on the next save. See ProductServiceImpl#replaceProductImage.
+      form.imagePublicId = ''
       form.stockQuantity = p.stockQuantity ?? 0
       form.categoryId = p.categoryId ?? null
       form.supplierCompanyId = p.supplierCompanyId ?? null
@@ -95,6 +106,7 @@ watch(
       form.sku = ''
       form.description = ''
       form.imageUrl = ''
+      form.imagePublicId = ''
       form.stockQuantity = 0
       form.categoryId = null
       form.supplierCompanyId = props.isAdmin ? null : null
@@ -158,6 +170,12 @@ function onSubmit() {
     sku: form.sku.trim(),
     description: form.description.trim() || null,
     imageUrl: form.imageUrl.trim() || null,
+    // Only send the publicId when the user just uploaded a NEW image in
+    // this session. If the URL is empty (cleared) we still send the publicId
+    // so the backend knows the previous Cloudinary asset should be destroyed
+    // too. Otherwise omit the field so a re-save without touching the image
+    // doesn't re-trigger destroy logic.
+    imagePublicId: form.imagePublicId ? form.imagePublicId.trim() : null,
     stockQuantity: Number(form.stockQuantity) || 0,
     categoryId: form.categoryId,
   }
@@ -247,15 +265,23 @@ function getError(field) {
         :disabled="submitting"
         @update:modelValue="clearFieldError('stockQuantity')"
       />
+    </div>
 
-      <BaseInput
-        v-model="form.imageUrl"
-        label="URL hình ảnh"
-        placeholder="https://..."
+    <!-- Product image: file-based upload via Cloudinary. The component
+         pushes the resulting URL back into form.imageUrl, which is what
+         onSubmit() forwards to the backend. The accompanying publicId is
+         also captured so the backend can destroy the previous Cloudinary
+         asset atomically (see ProductServiceImpl#replaceProductImage). -->
+    <div class="product-form__field product-form__field--full">
+      <BaseImageUploader
+        v-model:url="form.imageUrl"
+        v-model:publicId="form.imagePublicId"
+        variant="product"
+        label="Hình ảnh sản phẩm"
+        alt-text="Ảnh sản phẩm hiện tại"
         :error="getError('imageUrl')"
         :disabled="submitting"
-        autocomplete="off"
-        @update:modelValue="clearFieldError('imageUrl')"
+        help="PNG, JPG, WEBP hoặc GIF. Tối đa 5 MB. Ảnh sẽ được lưu trên Cloudinary CDN."
       />
     </div>
 

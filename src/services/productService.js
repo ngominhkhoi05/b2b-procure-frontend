@@ -58,6 +58,40 @@ export async function listProducts(params = {}) {
 }
 
 /**
+ * Slice-paginated product list for BUYER browse page.
+ *
+ * Drops the count(*) query used by {@link listProducts}, returning a
+ * lightweight payload with `hasNext` instead of `totalElements` /
+ * `totalPages`. Designed for infinite-scroll UIs on large catalogs.
+ *
+ * @param {{
+ *   keyword?: string,
+ *   categoryId?: number,
+ *   supplierCompanyId?: number,
+ *   page?: number,
+ *   size?: number,
+ * }} [params]
+ * @returns {Promise<SliceResponse<ProductResponse>>}
+ */
+export async function browseProducts(params = {}) {
+  const {
+    keyword,
+    categoryId,
+    supplierCompanyId,
+    page = 0,
+    size = 20,
+  } = params
+
+  const queryParams = { page, size }
+  if (keyword) queryParams.keyword = keyword
+  if (categoryId != null) queryParams.categoryId = categoryId
+  if (supplierCompanyId != null) queryParams.supplierCompanyId = supplierCompanyId
+
+  const response = await api.get('/products/browse-products', { params: queryParams })
+  return response.data.data
+}
+
+/**
  * Fetch a single product by id.
  *
  * @param {number|string} id
@@ -232,4 +266,14 @@ export async function deleteProductPrice(productId, priceId) {
  * @property {number}             totalPages
  * @property {boolean}            last
  * @property {boolean}            first
+ */
+
+/**
+ * @typedef {Object} SliceResponse
+ * @property {ProductResponse[]} content
+ * @property {number}             pageNo
+ * @property {number}             pageSize
+ * @property {boolean}            hasNext
+ * @property {boolean}            first
+ * @property {boolean}            last
  */

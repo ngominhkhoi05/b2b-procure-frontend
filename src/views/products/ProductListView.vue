@@ -2,20 +2,21 @@
 /**
  * ProductListView — role-aware product listing.
  *
- * BUYER  → card grid of ACTIVE products (read-only, click → detail).
+ * BUYER  → infinite-scroll card grid of ACTIVE products via GET /products/browse
+ *           (Slice-based: no count(*) query, hasNext-driven pagination).
  * SUPPLIER → table of own products with edit / status actions.
  * ADMIN  → table of all products with create / edit / status actions + filters.
  *
- * Pagination is server-driven (page / size / sort). Filters preserved on page change.
+ * Filters preserved on page change for admin/supplier. Buyer uses IntersectionObserver
+ * to auto-load next page when scrolling near the bottom.
  */
-import { ref, reactive, computed, onMounted, watch } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { listProducts } from '@/services/productService'
+import { listProducts, browseProducts } from '@/services/productService'
 import { listCategories } from '@/services/categoryService'
 import { useAuthStore } from '@/stores/auth'
 import { useToastStore } from '@/stores/toast'
 import { handleApiError } from '@/utils/errorHandler'
-import { formatCurrency } from '@/utils/format'
 
 import BaseLoading from '@/components/common/BaseLoading.vue'
 import BaseEmpty from '@/components/common/BaseEmpty.vue'
@@ -45,8 +46,9 @@ const filters = reactive({
 })
 
 const products = ref([])
-const pageData = ref({ pageNo: 0, pageSize: 0, totalElements: 0, totalPages: 0, last: true, first: true })
+const pageData = ref({ pageNo: 0, pageSize: 0, totalElements: 0, totalPages: 0, last: true, first: true, hasNext: false })
 const loading = ref(false)
+const loadingMore = ref(false)
 const error = ref(null)
 
 const categories = ref([])
@@ -56,14 +58,16 @@ const categoriesLoading = ref(false)
 // For simplicity we only show "Liên hệ" on cards when we don't have tiers pre-fetched.
 const productPriceMap = ref({}) // { [productId]: { from, to, count } }
 
+// Sentinel ref used by IntersectionObserver to trigger infinite-scroll loads.
+const loadMoreSentinel = ref(null)
+let scrollObserver = null
+
 const statusOptions = [
-  { value: '', label: 'Tất cả trạng thái' },
   { value: 'ACTIVE', label: 'ACTIVE' },
   { value: 'INACTIVE', label: 'INACTIVE' },
 ]
 
 const categoryOptions = computed(() => [
-  { value: '', label: 'Tất cả danh mục' },
   ...categories.value.map((c) => ({ value: c.id, label: c.name })),
 ])
 
@@ -85,6 +89,28 @@ async function loadCategories() {
   }
 }
 
+/**
+ * Build a price summary map from the response content. Used by both the
+ * paginated and infinite-scroll paths.
+ */
+function buildPriceMap(content) {
+  if (!isBuyer.value || content.length === 0) {
+    productPriceMap.value = {}
+    return
+  }
+  const map = {}
+  for (const p of content) {
+    if (p.priceFrom != null && p.priceTo != null) {
+      map[p.id] = {
+        from: p.priceFrom,
+        to: p.priceTo,
+        count: p.tierCount ?? 0,
+      }
+    }
+  }
+  productPriceMap.value = map
+}
+
 async function load() {
   loading.value = true
   error.value = null
@@ -98,21 +124,32 @@ async function load() {
     if (filters.categoryId) params.categoryId = filters.categoryId
     if (isAdmin.value && filters.status) params.status = filters.status
 
-    const data = await listProducts(params)
-    products.value = data.content || []
-    pageData.value = {
-      pageNo: data.pageNo,
-      pageSize: data.pageSize,
-      totalElements: data.totalElements,
-      totalPages: data.totalPages,
-      last: data.last,
-      first: data.first,
-    }
-
-    // Fetch price summaries for BUYER cards (best-effort, do not block listing)
-    if (isBuyer.value && products.value.length > 0) {
-      await loadBuyerPriceSummaries()
+    // BUYER uses the dedicated Slice endpoint for infinite-scroll.
+    if (isBuyer.value) {
+      const data = await browseProducts(params)
+      products.value = data.content || []
+      pageData.value = {
+        pageNo: data.pageNo,
+        pageSize: data.pageSize,
+        hasNext: data.hasNext,
+        first: data.first,
+        last: data.last,
+        totalElements: 0,
+        totalPages: 0,
+      }
+      buildPriceMap(products.value)
     } else {
+      const data = await listProducts(params)
+      products.value = data.content || []
+      pageData.value = {
+        pageNo: data.pageNo,
+        pageSize: data.pageSize,
+        totalElements: data.totalElements,
+        totalPages: data.totalPages,
+        last: data.last,
+        first: data.first,
+        hasNext: !data.last,
+      }
       productPriceMap.value = {}
     }
   } catch (err) {
@@ -124,37 +161,55 @@ async function load() {
   }
 }
 
-async function loadBuyerPriceSummaries() {
-  const { listProductPrices } = await import('@/services/productService')
-  const map = {}
-  // Run in parallel; tolerate failures silently
-  await Promise.all(
-    products.value.map(async (p) => {
-      try {
-        const tiers = await listProductPrices(p.id)
-        if (Array.isArray(tiers) && tiers.length > 0) {
-          const sorted = [...tiers].sort((a, b) => Number(a.unitPrice) - Number(b.unitPrice))
-          map[p.id] = {
-            from: sorted[0].unitPrice,
-            to: sorted[sorted.length - 1].unitPrice,
-            count: tiers.length,
-          }
-        }
-      } catch {
-        // ignore — leave card without price summary
-      }
-    })
-  )
-  productPriceMap.value = map
+/**
+ * Infinite-scroll loader for BUYER. Fetches the next page and appends
+ * results to `products`. No-op when there is no next page or when a
+ * load is already in flight.
+ */
+async function loadNextPage() {
+  if (!isBuyer.value) return
+  if (loadingMore.value || loading.value) return
+  if (!pageData.value.hasNext) return
+
+  loadingMore.value = true
+  try {
+    const nextPage = filters.page + 1
+    const params = {
+      page: nextPage,
+      size: filters.size,
+    }
+    if (filters.keyword) params.keyword = filters.keyword
+    if (filters.categoryId) params.categoryId = filters.categoryId
+
+    const data = await browseProducts(params)
+    const incoming = data.content || []
+    products.value.push(...incoming)
+    filters.page = nextPage
+    pageData.value = {
+      ...pageData.value,
+      pageNo: data.pageNo,
+      hasNext: data.hasNext,
+      last: data.last,
+    }
+    buildPriceMap(incoming)
+  } catch (err) {
+    const { message } = handleApiError(err)
+    toast.error(message)
+  } finally {
+    loadingMore.value = false
+  }
 }
 
-function goToPage(p) {
+async function goToPage(p) {
   if (p < 0 || p >= pageData.value.totalPages) return
+  if (p === filters.page) return
   filters.page = p
+  await load()
 }
 
 function resetAndReload() {
   filters.page = 0
+  products.value = []
   load()
 }
 
@@ -218,6 +273,40 @@ onMounted(() => {
   load()
 })
 
+onUnmounted(() => {
+  if (scrollObserver) {
+    scrollObserver.disconnect()
+    scrollObserver = null
+  }
+})
+
+// Setup IntersectionObserver once the sentinel is mounted and BUYER mode is active.
+watch(
+  [loadMoreSentinel, isBuyer, () => pageData.value.hasNext],
+  ([sentinel, buyer, hasNext]) => {
+    if (!buyer || !hasNext) {
+      if (scrollObserver) {
+        scrollObserver.disconnect()
+        scrollObserver = null
+      }
+      return
+    }
+    if (!sentinel) return
+    if (scrollObserver) scrollObserver.disconnect()
+    scrollObserver = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0]
+        if (entry && entry.isIntersecting && pageData.value.hasNext && !loading.value && !loadingMore.value) {
+          loadNextPage()
+        }
+      },
+      { rootMargin: '200px' },
+    )
+    scrollObserver.observe(sentinel)
+  },
+  { immediate: true },
+)
+
 // Reset page when role changes (very rare)
 watch(role, () => {
   filters.page = 0
@@ -271,6 +360,7 @@ watch(role, () => {
         v-if="isAdmin"
         v-model="filters.status"
         label="Trạng thái"
+        placeholder="Tất cả trạng thái"
         :options="statusOptions"
         @update:modelValue="onFilterChange"
       />
@@ -281,12 +371,12 @@ watch(role, () => {
       </div>
     </section>
 
-    <!-- Loading -->
+    <!-- Loading state for first load only (when no products yet) -->
     <div v-if="loading && products.length === 0" class="product-list-view__state">
       <BaseLoading label="Đang tải sản phẩm..." />
     </div>
 
-    <!-- Error -->
+    <!-- Error state for first load only -->
     <div v-else-if="error && products.length === 0" class="product-list-view__state">
       <BaseError
         title="Không tải được danh sách sản phẩm"
@@ -295,7 +385,7 @@ watch(role, () => {
       />
     </div>
 
-    <!-- Empty -->
+    <!-- Empty state -->
     <div v-else-if="products.length === 0" class="product-list-view__state">
       <BaseEmpty
         title="Chưa có sản phẩm nào"
@@ -311,25 +401,59 @@ watch(role, () => {
       </BaseEmpty>
     </div>
 
-    <!-- Buyer: card grid -->
+    <!-- Buyer: card grid (infinite scroll) -->
     <section
       v-else-if="isBuyer"
-      class="product-list-view__grid"
+      class="product-list-view__grid-wrap"
+      :class="{ 'product-list-view__grid-wrap--loading': loading }"
       aria-label="Danh sách sản phẩm"
     >
-      <ProductCard
-        v-for="p in products"
-        :key="p.id"
-        :product="p"
-        :price-from="productPriceMap[p.id]?.from ?? null"
-        :price-to="productPriceMap[p.id]?.to ?? null"
-        :tier-count="productPriceMap[p.id]?.count ?? 0"
-        @click="openProduct"
+      <div v-if="loading" class="product-list-view__overlay" aria-hidden="true">
+        <span class="product-list-view__overlay-spinner" />
+      </div>
+      <div class="product-list-view__grid">
+        <ProductCard
+          v-for="p in products"
+          :key="p.id"
+          :product="p"
+          :price-from="productPriceMap[p.id]?.from ?? null"
+          :price-to="productPriceMap[p.id]?.to ?? null"
+          :tier-count="productPriceMap[p.id]?.count ?? 0"
+          @click="openProduct"
+        />
+      </div>
+
+      <!-- Sentinel observed by IntersectionObserver to load more pages -->
+      <div
+        v-if="pageData.hasNext"
+        ref="loadMoreSentinel"
+        class="product-list-view__load-more-sentinel"
+        aria-hidden="true"
       />
+
+      <div v-if="loadingMore" class="product-list-view__loading-more" aria-live="polite">
+        <BaseLoading label="Đang tải thêm sản phẩm..." />
+      </div>
+
+      <div
+        v-else-if="!pageData.hasNext && products.length > 0"
+        class="product-list-view__end-message"
+        aria-live="polite"
+      >
+        Đã hiển thị tất cả sản phẩm.
+      </div>
     </section>
 
     <!-- Admin / Supplier: table -->
-    <section v-else class="product-list-view__table-wrap" aria-label="Danh sách sản phẩm">
+    <section
+      v-else
+      class="product-list-view__table-wrap"
+      :class="{ 'product-list-view__table-wrap--loading': loading }"
+      aria-label="Danh sách sản phẩm"
+    >
+      <div v-if="loading" class="product-list-view__overlay" aria-hidden="true">
+        <span class="product-list-view__overlay-spinner" />
+      </div>
       <ProductTable :products="products" :loading="loading" @row-click="openProduct">
         <template #actions="{ product }">
           <button
@@ -357,9 +481,9 @@ watch(role, () => {
       </ProductTable>
     </section>
 
-    <!-- Pagination -->
+    <!-- Pagination (admin/supplier only — BUYER uses infinite scroll) -->
     <nav
-      v-if="!loading && products.length > 0 && pageData.totalPages > 1"
+      v-if="!isBuyer && products.length > 0 && pageData.totalPages > 1"
       class="product-list-view__pagination"
       aria-label="Phân trang"
     >
@@ -492,6 +616,55 @@ watch(role, () => {
   background: var(--color-surface);
   border-radius: var(--radius-lg);
   border: 1px solid var(--color-border);
+}
+
+.product-list-view__grid-wrap,
+.product-list-view__table-wrap {
+  position: relative;
+  min-height: 320px;
+  transition: opacity var(--transition-fast);
+}
+
+.product-list-view__grid-wrap--loading .product-list-view__grid,
+.product-list-view__table-wrap--loading .product-table {
+  opacity: 0.5;
+  transition: opacity var(--transition-fast);
+}
+
+.product-list-view__grid-wrap--loading,
+.product-list-view__table-wrap--loading {
+  pointer-events: none;
+}
+
+.product-list-view__grid-wrap--loading::after,
+.product-list-view__table-wrap--loading::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-color: var(--color-surface);
+  opacity: 0.5;
+  transition: opacity var(--transition-fast);
+  pointer-events: none;
+  z-index: 1;
+}
+
+.product-list-view__overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.product-list-view__overlay-spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid var(--color-border-strong);
+  border-top-color: var(--color-primary);
+  border-radius: var(--radius-full);
+  animation: spin 0.6s linear infinite;
 }
 
 .product-list-view__grid {
@@ -658,6 +831,25 @@ watch(role, () => {
   border-right-color: transparent;
   border-radius: var(--radius-full);
   animation: spin 0.6s linear infinite;
+}
+
+.product-list-view__load-more-sentinel {
+  width: 100%;
+  height: 1px;
+}
+
+.product-list-view__loading-more {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-4) 0;
+}
+
+.product-list-view__end-message {
+  text-align: center;
+  padding: var(--space-4) 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-sm);
 }
 
 @keyframes spin {

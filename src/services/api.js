@@ -11,8 +11,10 @@
  */
 
 import axios from 'axios'
-import { getAccessToken } from '@/utils/auth'
+import { getAccessToken, removeAccessToken } from '@/utils/auth'
 import { normalizeError } from '@/utils/errorHandler'
+import { useAuthStore } from '@/stores/auth'
+import router from '@/router'
 
 // ── Axios instance ────────────────────────────────────────────────────────────
 
@@ -27,8 +29,12 @@ const api = axios.create({
     Accept: 'application/json',
   },
 
-  // 15-second timeout keeps the UX from hanging indefinitely on a dead backend.
-  timeout: 15_000,
+  // 60-second timeout accommodates:
+  //   • Backend cold start (Spring Boot may take 30s on first request after boot).
+  //   • BUYER flow: GET /products + 12 parallel GET /products/{id}/prices in worst case.
+  //   • Large pages on a 1M-row products table.
+  // Override per-request for tighter SLA endpoints.
+  timeout: 60_000,
 })
 
 // ── Request interceptor ────────────────────────────────────────────────────────
@@ -46,13 +52,56 @@ api.interceptors.request.use(
 
 // ── Response interceptor ──────────────────────────────────────────────────────
 
+/**
+ * Tracks whether a global 401 redirect is already in flight so we don't
+ * trigger more than one navigation per expiry event. A dashboard that
+ * fans out 5 parallel calls would otherwise stack 5 redirects.
+ */
+let isRedirectingOn401 = false
+
+function handleUnauthorized() {
+  // Clear the persisted token + Pinia auth state.
+  removeAccessToken()
+  try {
+    const auth = useAuthStore()
+    if (auth && typeof auth.clearSession === 'function') {
+      auth.clearSession()
+    }
+  } catch {
+    // Pinia may not be active yet during early bootstrapping — ignore.
+  }
+
+  if (isRedirectingOn401) return
+  isRedirectingOn401 = true
+
+  const currentRoute = router.currentRoute.value
+  const target = currentRoute?.name === 'login'
+    ? null
+    : (currentRoute?.fullPath ?? '/')
+
+  router
+    .replace(target ? { name: 'login', query: { redirect: target } } : { name: 'login' })
+    .finally(() => {
+      // Re-arm after a tick so a subsequent legitimate 401 still redirects.
+      setTimeout(() => {
+        isRedirectingOn401 = false
+      }, 500)
+    })
+}
+
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    // Normalise and rethrow as a structured ApiError so every catch-site
-    // receives the same shape regardless of whether this was a 4xx, 5xx,
-    // network error, or something unexpected.
-    return Promise.reject(normalizeError(error))
+    // Normalise first so call-sites always see a structured ApiError.
+    const normalised = normalizeError(error)
+
+    // Global 401 handler: a token that was valid at boot has now expired
+    // (or been revoked). Clear the session and bounce the buyer to /login.
+    if (normalised?.status === 401) {
+      handleUnauthorized()
+    }
+
+    return Promise.reject(normalised)
   }
 )
 

@@ -1,10 +1,9 @@
 <script setup>
 /**
- * CartSummary — totals + destructive actions for the cart.
+ * CartSummary — totals + checkout CTA for the cart.
  *
  * Props:
  *   cart        — CartResponse | null
- *   clearing    — boolean (true while the clear request is in flight)
  *   selectable  — boolean (Phase 6 — show the "Proceed to Checkout" CTA)
  *   canCheckout — boolean (true iff at least one valid item is selected
  *                          AND all selected items belong to one supplier)
@@ -12,11 +11,13 @@
  *                                    canCheckout is false but items exist)
  *
  * Emits:
- *   clear()
  *   checkout()  — only fired when canCheckout is true
  *
  * Notes:
  *   - All totals come from the backend.
+ *   - The destructive "Clear cart" action lives in the page header as a
+ *     text link (opens a confirmation modal). It's intentionally NOT here
+ *     so the primary CTA stays visually dominant.
  *   - The real Checkout flow (COD + ZaloPay) is wired up in Phase 6.
  */
 import { computed } from 'vue'
@@ -27,10 +28,6 @@ const props = defineProps({
   cart: {
     type: Object,
     default: null,
-  },
-  clearing: {
-    type: Boolean,
-    default: false,
   },
   selectable: {
     type: Boolean,
@@ -46,7 +43,7 @@ const props = defineProps({
   },
 })
 
-defineEmits(['clear', 'checkout'])
+defineEmits(['checkout'])
 
 const totalAmount = computed(() => props.cart?.totalAmount ?? null)
 const totalItems = computed(() => props.cart?.totalItems ?? 0)
@@ -86,17 +83,6 @@ const hasItems = computed(() => totalItems.value > 0)
         @click="$emit('checkout')"
       >
         Tiến hành thanh toán
-      </BaseButton>
-
-      <BaseButton
-        v-if="hasItems"
-        variant="danger"
-        block
-        :loading="clearing"
-        :disabled="clearing"
-        @click="$emit('clear')"
-      >
-        Xóa toàn bộ giỏ hàng
       </BaseButton>
     </div>
   </aside>

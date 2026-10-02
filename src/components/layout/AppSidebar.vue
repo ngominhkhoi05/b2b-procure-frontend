@@ -167,7 +167,10 @@ function handleNavClick() {
   width: 240px;
   flex-shrink: 0;
   transition: width var(--transition-base);
-  height: 100%;
+  height: 100vh;
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
   overflow: hidden;
 }
 
@@ -179,9 +182,9 @@ function handleNavClick() {
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  padding: var(--space-5) var(--space-4);
+  padding: var(--space-4) var(--space-4);
   border-bottom: 1px solid var(--color-border);
-  min-height: 64px;
+  height: 64px;
   flex-shrink: 0;
 }
 
