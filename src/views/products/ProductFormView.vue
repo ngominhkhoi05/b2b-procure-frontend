@@ -19,6 +19,7 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { getProductById, createProduct, updateProduct } from '@/services/productService'
 import { listCategories } from '@/services/categoryService'
+import { listCompanies } from '@/services/companyService'
 import { useAuthStore } from '@/stores/auth'
 import { useToastStore } from '@/stores/toast'
 import { handleApiError } from '@/utils/errorHandler'
@@ -44,6 +45,7 @@ const loading = ref(false)
 const loadError = ref(null)
 
 const categories = ref([])
+const supplierCompanies = ref([])
 const submitting = ref(false)
 const formErrors = reactive({})
 
@@ -54,6 +56,20 @@ async function loadCategories() {
   } catch (err) {
     // Form will show an empty category dropdown; backend will still reject create.
     categories.value = []
+  }
+}
+
+async function loadSupplierCompanies() {
+  if (!isAdmin.value) {
+    supplierCompanies.value = []
+    return
+  }
+  try {
+    const page = await listCompanies({ companyType: 'SUPPLIER', size: 500, sort: 'name,asc' })
+    supplierCompanies.value = page.content || []
+  } catch (err) {
+    // Form will show an empty supplier dropdown; admin can still create without supplier selection
+    supplierCompanies.value = []
   }
 }
 
@@ -74,8 +90,7 @@ async function loadProduct() {
 }
 
 onMounted(async () => {
-  await loadCategories()
-  await loadProduct()
+  await Promise.all([loadCategories(), loadSupplierCompanies(), loadProduct()])
 })
 
 function mapBackendErrors(err) {
@@ -155,6 +170,7 @@ function handleCancel() {
       v-else
       :initial-product="product"
       :categories="categories"
+      :supplier-companies="supplierCompanies"
       :is-admin="isAdmin"
       :submitting="submitting"
       :errors="formErrors"
